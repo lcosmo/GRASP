@@ -4,7 +4,6 @@ from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
 
 from .common import *
-from .encoders import *
 from .diffusion import *
 
 import pytorch_lightning as L

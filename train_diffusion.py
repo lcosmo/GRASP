@@ -46,7 +46,7 @@ def get_arg_parser():
     # Training
     parser.add_argument('--seed', type=int, default=2020)
     parser.add_argument('--device', type=str, default="cuda")
-    parser.add_argument('--check_val_every_n_epoch', type=int, default=1000)
+    parser.add_argument('--check_val_every_n_steps', type=int, default=2000)
 
     #Dataset & Score Model
     parser.add_argument('--model_tag', type=str, default='self-cross-hugg')
@@ -99,6 +99,7 @@ if __name__ == "__main__":
 
     run_params=args
     args.train_loop_batches = len(train_loader)
+    args.max_epochs = args.max_epochs//args.train_loop_batches + 1
     model = Transformer(args)
 
     # trainer = pl.Trainer(limit_train_batches=100, max_epochs=10,accelerator="auto")

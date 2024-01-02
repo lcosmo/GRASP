@@ -38,7 +38,7 @@ def get_arg_parser():
     parser.add_argument('--generator_layers', type=int, default=8)
     parser.add_argument('--generator_data_channels', type=int, default=32)
     parser.add_argument('--generator_init_emb_channels', type=int, default=64)
-    parser.add_argument('--generator_noise_latent_dim', type=int, default=100)
+    parser.add_argument('--generator_noise_latent_dim', type=int, default=128)
     parser.add_argument('--discriminator_layers', type=int, default=4)
     parser.add_argument('--discriminator_data_channels', type=int, default=32)
     parser.add_argument('--rec_weight', type=float, default=1e-1)
@@ -52,7 +52,7 @@ def get_arg_parser():
     parser.add_argument('--batch_size', type=int, default=8)
     
     parser.add_argument('--max_epochs', type=int, default=10000)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--check_val_every_n_epoch', type=int, default=20)
     parser.add_argument('--seed', type=int, default=2023)
     
@@ -105,8 +105,8 @@ if __name__ == "__main__":
     del model
     # torch.save([generations_dataset,generations_dataset_val],"tmp.data")
 
-    dataloader = DataLoader(ConcatDataset(train_set,generations_dataset), batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=True)
-    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=True)
+    dataloader = DataLoader(ConcatDataset(train_set,generations_dataset), batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=False)
+    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=False)
 
     ###################################
     args.n_max = graphs_train_set.n_max
@@ -116,11 +116,11 @@ if __name__ == "__main__":
         save_last=True,
         save_top_k=1,
         verbose=True,
-        monitor='degree',
+        monitor='avg_degrad',
         mode='min'
     )
     early_stop_callback = EarlyStopping(
-        monitor='degree',
+        monitor='avg_degrad',
         min_delta=0,
         patience=2000,
         verbose=False,

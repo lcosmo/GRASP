@@ -3,7 +3,6 @@ import wandb
 from torch.nn import Module
 
 from .common import *
-from .encoders import *
 from .diffusion import *
 
 import pytorch_lightning as L
@@ -57,7 +56,7 @@ class Refiner(L.LightningModule):
 #             lr=self.hparams.lr
 #         )
 
-        optimizerD = torch.optim.AdamW(self.discriminator.parameters(), lr=self.hparams.lr)
+        optimizerD = torch.optim.AdamW(self.discriminator.parameters(), lr=self.hparams.lr*1e-1)
         optimizerG = torch.optim.AdamW(self.generator.parameters(), lr=self.hparams.lr)
         optimizer = [optimizerD,optimizerG]
 
@@ -104,10 +103,7 @@ class Refiner(L.LightningModule):
         noisy_real_eigvec = noisy_real_eigvec/noisy_real_eigvec.norm(dim=1)[:,None,:]
         
         device = mask.device
-        
-        #generate fake_data
-        noise =  torch.randn(list(mask.shape[:2])+[generator.latent_dim], device=device)*1e-2
-        fake_adj = generator(noise, noisy_gen_eigval, noisy_gen_eigvec, mask)
+    
         
         ############################
         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
@@ -118,8 +114,13 @@ class Refiner(L.LightningModule):
             generator.eval()
             optimizerD.zero_grad()
 
+            #generate fake_data
+            with torch.no_grad():
+                noise =  torch.randn(list(mask[num_gt:].shape[:2])+[generator.latent_dim], device=device)*1e-2
+                fake_adj = generator(noise, noisy_gen_eigval[num_gt:], noisy_gen_eigvec[num_gt:], mask[num_gt:])
+            
             fake_label = torch.zeros((mask[num_gt:].shape[0],), device=mask.device)
-            fake_pred = discriminator(noisy_gen_eigval[num_gt:], noisy_gen_eigvec[num_gt:], mask[num_gt:], fake_adj[num_gt:].detach(), node_features=None, edge_features=None)
+            fake_pred = discriminator(noisy_gen_eigval[num_gt:], noisy_gen_eigvec[num_gt:], mask[num_gt:], fake_adj, node_features=None, edge_features=None)
             fake_loss = criterion(fake_pred[:,0],fake_label)
             fake_loss.backward()
                                    
@@ -128,7 +129,7 @@ class Refiner(L.LightningModule):
             true_label = torch.ones((mask_half.shape[0],), device=mask.device)
             true_pred = discriminator(noisy_real_eigval, noisy_real_eigvec, mask_half, noisy_adj, node_features=None, edge_features=None)
             true_loss = criterion(true_pred[:,0],true_label)
-            true_loss.backward()
+            # true_loss.backward()
             true_loss = true_loss.item()
 
             optimizerD.step()
@@ -143,8 +144,12 @@ class Refiner(L.LightningModule):
         generator.train()
         optimizerG.zero_grad()
         
-        true_label = torch.ones((noisy_gen_eigval.shape[0],), device=mask.device)
-        fake_pred = discriminator(noisy_gen_eigval, noisy_gen_eigvec, mask, fake_adj, node_features=None, edge_features=None)
+        #generate fake_data
+        noise =  torch.randn(list(mask.shape[:2])+[generator.latent_dim], device=device)*1e-2
+        fake_adj = generator(noise, noisy_gen_eigval, noisy_gen_eigvec, mask)
+        
+        true_label = torch.ones((noisy_gen_eigval[num_gt:].shape[0],), device=mask.device)
+        fake_pred = discriminator(noisy_gen_eigval[num_gt:], noisy_gen_eigvec[num_gt:], mask[num_gt:], fake_adj[num_gt:], node_features=None, edge_features=None)
         gen_loss = criterion(fake_pred[:,0],true_label)
         rec_loss = torch.nn.functional.torch.nn.functional.binary_cross_entropy(fake_adj[:num_gt],noisy_adj)
         genrec_loss = gen_loss + self.hparams.rec_weight*rec_loss
@@ -171,7 +176,7 @@ class Refiner(L.LightningModule):
         if tot_dis_loss!=tot_dis_loss:
             tot_dis_loss = self.last_tot_dis_loss
 
-        self.train_dicriminator = tot_gen_loss<=2*tot_dis_loss or self.current_epoch<1 or self.current_epoch%100==0
+        self.train_dicriminator = tot_gen_loss<=2*tot_dis_loss or self.current_epoch<1 #or self.current_epoch%100==0
         self.last_tot_dis_loss = tot_dis_loss
         
 #         self.log('TOT_gen_loss', tot_gen_loss, on_step=False, on_epoch=True)
@@ -189,15 +194,19 @@ class Refiner(L.LightningModule):
         ori_train_set = self.trainer.val_dataloaders[0].dataset.datasets[0]
         gen_test_set = self.trainer.val_dataloaders[0].dataset.datasets[1]
 
-        degree, cluster, orbit, unique, novel, spectral = self.evaluate(ori_train_set, gen_test_set, device=self.generator.powerful.in_lin[0].bias.device)
+        degree, cluster,  unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad = self.evaluate(ori_train_set, gen_test_set, device=self.generator.powerful.in_lin[0].bias.device)
         
         self.log('degree', torch.tensor(degree).float(), on_step=False, on_epoch=True)
         self.log('cluster',  torch.tensor(cluster).float(), on_step=False, on_epoch=True)
-        self.log('orbit',  torch.tensor(orbit).float(), on_step=False, on_epoch=True)
+        # self.log('orbit',  torch.tensor(orbit).float(), on_step=False, on_epoch=True)
         self.log('unique',  torch.tensor(unique).float(), on_step=False, on_epoch=True)
         self.log('novel',  torch.tensor(novel).float(), on_step=False, on_epoch=True)
         self.log('spectral',  torch.tensor(spectral).float(), on_step=False, on_epoch=True)
 
+        self.log('degree_degrad', torch.tensor(degree_degrad).float(), on_step=False, on_epoch=True)
+        self.log('cluster_degrad',  torch.tensor(cluster_degrad).float(), on_step=False, on_epoch=True)
+        self.log('spectral_degrad',  torch.tensor(spectral_degrad).float(), on_step=False, on_epoch=True)
+        self.log('avg_degrad',  torch.tensor(avg_degrad).float(), on_step=False, on_epoch=True)
         
     def evaluate(self, train_set, test_set, device='cuda'):
         train_set.get_extra_data(True)
@@ -256,28 +265,32 @@ class Refiner(L.LightningModule):
             Aori= Aori*(-1)
             graph_test_list.append(nx.from_numpy_array(Aori)) 
 
-        graph_train_list = []
-        for jj in range(len(train_set)):
-            laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
-            Aori = np.copy(laplacian_matrix)
-            np.fill_diagonal(Aori,0)
-            Aori= Aori*(-1)
-            graph_train_list.append(nx.from_numpy_array(Aori)) 
+        graph_train_list = graph_test_list
+        # for jj in range(len(train_set)):
+        #     laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
+        #     Aori = np.copy(laplacian_matrix)
+        #     np.fill_diagonal(Aori,0)
+        #     Aori= Aori*(-1)
+        #     graph_train_list.append(nx.from_numpy_array(Aori)) 
 
 
         degree, cluster, orbit, unique, novel, spectral = 0,0,0,0,0,0
         if len(graph_pred_list_remove_empty)>0:
             degree = degree_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
             cluster = clustering_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
-            orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
+            # orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
             unique,novel,_ = eval_fraction_unique_non_isomorphic_valid(graph_pred_list_remove_empty,graph_train_list)
             spectral = spectral_stats(graph_test_list, graph_pred_list_remove_empty)
 
-        
+        degree_degrad = degree/train_set.degree
+        cluster_degrad = cluster/train_set.cluster
+        spectral_degrad = spectral/train_set.spectral
+
+        avg_degrad = (degree_degrad + cluster_degrad + spectral_degrad)/3
 #         train_set.get_extra_data(False)
 #         test_set.get_extra_data(False)
         
-        return degree, cluster, orbit, unique, novel, spectral
+        return degree, cluster, unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad
     
     
     

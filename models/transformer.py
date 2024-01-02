@@ -4,7 +4,6 @@ from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
 
 from .common import *
-from .encoders import *
 from .diffusion import *
 
 import pytorch_lightning as L
@@ -115,7 +114,7 @@ class Transformer(L.LightningModule):
 
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps = int(self.hparams.train_loop_batches*200),
+            num_warmup_steps = 500,
             num_training_steps = self.hparams.train_loop_batches*self.hparams.max_epochs
         )
 
