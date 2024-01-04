@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 import scipy
 import networkx as nx
 from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, eval_fraction_unique, eval_fraction_unique_non_isomorphic_valid, spectral_stats
+from utils import eval_helper_torch
 
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
@@ -29,7 +30,7 @@ class Transformer(L.LightningModule):
         self.save_hyperparameters(hparams)
         self.args = self.hparams
         
-        self.diffusion = PointwiseNet(self.args.k, args = self.args)
+        self.diffusion = PointwiseNet(self.args.k+self.args.feature_size, args = self.args)
         self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000, clip_sample=False,beta_schedule='linear')
         
         self.automatic_optimization = False
@@ -92,12 +93,16 @@ class Transformer(L.LightningModule):
         #     reproject to orthonormal bases
             if reproject and t<sampling_steps*0.1:
                 M = scheduler.step(noisy_residual, t, noise).pred_original_sample*m_all
-                M,yy = unscale_xy(M[:,:-1,:],M[:,-1,:])
+                M,yy = unscale_xy(M[:,:-1,],M[:,-1,:])
                 
-                svd = torch.svd(M)
+                padsize = M.shape[-1]-self.hparams.k
+                M = M[:,:,:self.hparams.k]
+                yy = yy[:,:self.hparams.k]
+                
+                svd = torch.svd(M[:,:])
                 orth = svd.U@svd.V.transpose(-1,-2)
-                grad = scale_xy(orth-M,yy)[0]
-                previous_noisy_sample[:,:-1,:] += 1e-2*grad.to(previous_noisy_sample.device)
+                grad = scale_xy(torch.nn.functional.pad(orth-M,(0,padsize)),torch.nn.functional.pad(yy,(0,padsize)))[0]
+                previous_noisy_sample[:,:-1,:self.hparams.k] += 1e-2*grad.to(previous_noisy_sample.device)[:,:,:self.hparams.k]
             else:
                 previous_noisy_sample = scheduler.step(noisy_residual, t, noise).prev_sample
 
@@ -198,6 +203,9 @@ class Transformer(L.LightningModule):
             yy = X[-1:,:]
 
             xx,yy = unscale_xy(xx,yy)
+            xx = xx[:,:self.hparams.k]
+            yy = yy[:,:self.hparams.k]
+            
             yy=yy.float()
 
             xx_o=xx
@@ -249,13 +257,13 @@ class Transformer(L.LightningModule):
         
         
         
-        batch = next(iter(DataLoader(test_set, batch_size=len(test_set), shuffle=False, num_workers=0)))
+        batch = next(iter(DataLoader(test_set, batch_size=min(2048,len(test_set)), shuffle=False, num_workers=0)))
         b,n,d = batch[0].shape
+        
+        graph_pred_list, orth_pred_list = self.sample_graphs(max_nodes=n, num_eigs=d, scale_xy = train_set.scale_xy, unscale_xy=train_set.unscale_xy, num_graphs=max(256, b), device=device)
+        graph_pred_list = graph_pred_list
 
-        graph_pred_list, orth_pred_list = self.sample_graphs(max_nodes=n, num_eigs=d, scale_xy = train_set.scale_xy, unscale_xy=train_set.unscale_xy, num_graphs=128, device=device)
-        graph_pred_list = graph_pred_list[:b]
-
-        graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0]
+        graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0][:b]
 
 #         #log to wandb
 #         plt.figure()
@@ -292,31 +300,49 @@ class Transformer(L.LightningModule):
             })
 
         
-        #compute metrics
-        graph_test_list = []
-        for jj in range(len(test_set)):
-            laplacian_matrix = np.array(test_set[jj][3].cpu())[:test_set[jj][4],:test_set[jj][4]]
-            Aori = np.copy(laplacian_matrix)
-            np.fill_diagonal(Aori,0)
-            Aori= Aori*(-1)
-            graph_test_list.append(nx.from_numpy_array(Aori)) 
+        MAX_GRAPHS = 2048
+        train_subset = [train_set[i] for i in np.random.permutation(len(train_set))[:MAX_GRAPHS]]
+        test_subset = [test_set[i] for i in np.random.permutation(len(test_set))[:MAX_GRAPHS]]
+        
+        adj_list_train = [g[-1][0][:g[-2]][:,:g[-2]].cpu() for g in train_subset]
+        adj_list_test = [g[-1][0][:g[-2]][:,:g[-2]].cpu() for g in test_subset]
 
-        graph_train_list = []
-        for jj in range(len(train_set)):
-            laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
-            Aori = np.copy(laplacian_matrix)
-            np.fill_diagonal(Aori,0)
-            Aori= Aori*(-1)
-            graph_train_list.append(nx.from_numpy_array(Aori)) 
-
+        adj_list_train = [a[m,:][:,m] for a,m in zip(adj_list_train,[z.sum(-1)>0 for z in adj_list_train])] #remove isolated
+        adj_list_test = [a[m,:][:,m] for a,m in zip(adj_list_test,[z.sum(-1)>0 for z in adj_list_test])] #remove isolated
+        adj_list_pred = [torch.tensor(nx.to_numpy_array(g)).float() for g in graph_pred_list_remove_empty]
 
         degree, cluster, orbit, unique, novel, spectral = 0,0,0,0,0,0
         if len(graph_pred_list_remove_empty)>0:
-            degree = degree_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
-            cluster = clustering_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
-            orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
-            unique,novel,_ = eval_fraction_unique_non_isomorphic_valid(graph_pred_list_remove_empty,graph_train_list)
-            spectral = spectral_stats(graph_test_list, graph_pred_list_remove_empty)
+            degree = eval_helper_torch.degree_stats( adj_list_test,adj_list_pred, compute_emd=False)
+            cluster = eval_helper_torch.clustering_stats( adj_list_test,adj_list_pred, compute_emd=False)
+#             spectral = eval_helper_torch.spectral_stats(adj_list_test, adj_list_pred)
+        
+        
+#         #compute metrics
+#         graph_test_list = []
+#         for jj in range(len(test_set)):
+#             laplacian_matrix = np.array(test_set[jj][3].cpu())[:test_set[jj][4],:test_set[jj][4]]
+#             Aori = np.copy(laplacian_matrix)
+#             np.fill_diagonal(Aori,0)
+#             Aori= Aori*(-1)
+#             graph_test_list.append(nx.from_numpy_array(Aori)) 
+
+#         graph_train_list = []
+#         for jj in range(len(train_set)):
+#             laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
+#             Aori = np.copy(laplacian_matrix)
+#             np.fill_diagonal(Aori,0)
+#             Aori= Aori*(-1)
+#             graph_train_list.append(nx.from_numpy_array(Aori)) 
+
+
+#         degree, cluster, orbit, unique, novel, spectral = 0,0,0,0,0,0
+#         if len(graph_pred_list_remove_empty)>0:
+#             degree = degree_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
+#             cluster = clustering_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
+# #             orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
+# #             unique,novel,_ = eval_fraction_unique_non_isomorphic_valid(graph_pred_list_remove_empty,graph_train_list)
+#             spectral = spectral_stats(graph_test_list, graph_pred_list_remove_empty)
 
         
         train_set.get_extra_data(False)

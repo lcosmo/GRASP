@@ -106,6 +106,11 @@ def degree_stats(graph_ref_list, graph_pred_list, is_parallel=True, compute_emd=
         # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=emd)
         mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_emd)
     else:
+#         print("sample_ref")
+#         print(sample_ref)
+#         print("sample_pred")
+#         print(sample_pred)
+        
         mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_tv)
     # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian)
 
@@ -121,6 +126,7 @@ def spectral_worker(G, n_eigvals=-1):
     try:
         eigs = eigvalsh(nx.normalized_laplacian_matrix(G).todense())  
     except:
+        print("FAIL")
         eigs = np.zeros(G.number_of_nodes())
     if n_eigvals > 0:
         eigs = eigs[1:n_eigvals+1]
@@ -279,6 +285,7 @@ def spectral_stats(graph_ref_list, graph_pred_list, is_parallel=True, n_eigvals=
             spectral_temp = spectral_worker(graph_pred_list_remove_empty[i], n_eigvals)
             sample_pred.append(spectral_temp)
 
+    
     # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_emd)
     # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=emd)
     if compute_emd:
@@ -346,7 +353,10 @@ def clustering_stats(graph_ref_list,
             sample_pred.append(hist)
 
     
-    
+    #         print("sample_ref")
+#         print(sample_ref)
+#         print("sample_pred")
+#         print(sample_pred)
     if compute_emd:
         # EMD option uses the same computation as GraphRNN, the alternative is MMD as computed by GRAN
         # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=emd, sigma=1.0 / 10)

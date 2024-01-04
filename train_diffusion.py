@@ -46,13 +46,16 @@ def get_arg_parser():
     # Training
     parser.add_argument('--seed', type=int, default=2020)
     parser.add_argument('--device', type=str, default="cuda")
-    parser.add_argument('--check_val_every_n_steps', type=int, default=2000)
+    parser.add_argument('--val_check_interval', type=int, default=500)
 
     #Dataset & Score Model
     parser.add_argument('--model_tag', type=str, default='self-cross-hugg')
     parser.add_argument('--dataset', type=str, default='sbm_200')
     parser.add_argument('--k', type=int, default=33)
     parser.add_argument('--smallest', type=eval, default=False, choices=[True, False])
+    
+    parser.add_argument('--scaler', type=str, default="minmax") #stadard if not specified
+    
     parser.add_argument('--latent_dim', type=int, default=128)
     parser.add_argument('--layers', type=int, default=9)
     parser.add_argument('--use_mask', type=eval, default=True, choices=[True, False])
@@ -62,11 +65,12 @@ def get_arg_parser():
 if __name__ == "__main__":   
     args = get_arg_parser().parse_args()
     args.point_dim=args.k
+    
     seed_all(args.seed)
     
     
-    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train')
-    test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test')
+    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"])
+    test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"])
     
     train_set.get_extra_data(False)
     
@@ -100,6 +104,8 @@ if __name__ == "__main__":
     run_params=args
     args.train_loop_batches = len(train_loader)
     args.max_epochs = args.max_epochs//args.train_loop_batches + 1
+    args.feature_size = train_set[0][0].shape[-1]-args.k
+    
     model = Transformer(args)
 
     # trainer = pl.Trainer(limit_train_batches=100, max_epochs=10,accelerator="auto")
@@ -128,7 +134,8 @@ if __name__ == "__main__":
         callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="auto",
         logger=wandb_logger,
-        log_every_n_steps=250
+        log_every_n_steps=250,
+        check_val_every_n_epoch=None
     )
 
     trainer.fit(model, train_loader, valid_loader)

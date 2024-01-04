@@ -14,6 +14,7 @@ import re
 import glob
 import numpy as np
 from torch.utils.data import Dataset, DataLoader, random_split
+from types import MethodType
 
 from torch_geometric.data import Batch, Data
 
@@ -30,6 +31,8 @@ import math
 import sklearn
 
 from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, eval_fraction_unique, eval_fraction_unique_non_isomorphic_valid, spectral_stats
+
+from utils.eval_helper_torch import degree_stats, clustering_stats, spectral_stats
  
  
 # def minmax_norm(value,maxval, minval):
@@ -57,7 +60,7 @@ from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, e
 
 class LaplacianDatasetNX(Dataset):
     
-    def __init__(self,_folder,ds_filename,point_dim=7, smallest=True, split='all'):
+    def __init__(self,_folder,ds_filename,point_dim=7, smallest=True, split='all', scaler="standard", nodefeatures=False):
         
         self.point_dim = point_dim
         self.samples = []
@@ -65,7 +68,7 @@ class LaplacianDatasetNX(Dataset):
         self.label = []
 #         folder = '/home/lcosmo/GIORGIA/'
 
-        filename = f"{ds_filename}_{point_dim}_sm{smallest}.torch"
+        filename = f"{ds_filename}_{point_dim}_sm{smallest}_sc{scaler}.torch"
         if not os.path.isfile(filename):
             with open( ds_filename+'.pkl', "rb") as f:
     #         with open(folder+'/'+filename+'.pkl', "rb") as f:
@@ -82,9 +85,9 @@ class LaplacianDatasetNX(Dataset):
                 nodelist = graph_list[ids].number_of_nodes()   
                 
                 if  nodelist<point_dim:
+                       print("Too few nodes")
                        continue   
-                else:
-                                  
+                else:                                  
                     indices.append(ids)                
                     maxdimensions = max(maxdimensions,(nodelist))
     
@@ -94,6 +97,7 @@ class LaplacianDatasetNX(Dataset):
             
             
             try:
+                aaaa
                 eigen_dic = torch.load(ds_filename+'.eigen')
                 print("Loaded precomuted eigenquantities")
             
@@ -123,7 +127,7 @@ class LaplacianDatasetNX(Dataset):
     #                 eigva = eigva[:point_dim] 
     #                 ori_eigenvalues.append(eigva)
                 
-                torch.save(eigen_dic,ds_filename+'.eigen')
+#                 torch.save(eigen_dic,ds_filename+'.eigen')
             
             self.mu = 0#mu
             self.std = 1#std
@@ -133,7 +137,12 @@ class LaplacianDatasetNX(Dataset):
             ids_list = eigen_dic.keys()
             
             
-             
+            if nodefeatures:
+                node_labels = [torch.tensor([G.nodes[i]['x'] for i in range(len(G.nodes))]) for G in graph_list]
+                num_labels = torch.cat(node_labels,-1).max()+1
+                node_labels = [torch.nn.functional.one_hot(l, num_labels) for l in node_labels]
+
+
             for ids,indiceori in enumerate(indices): 
                 label = []
      
@@ -168,6 +177,12 @@ class LaplacianDatasetNX(Dataset):
                     else:
                         eigvec = v[:,eigva_ids_sort][:,-point_dim:] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
                         
+                        
+                    ################ if we have labels, append them to eigenvectos ###################
+                    if nodefeatures:
+                        eigvec = np.concatenate([eigvec,node_labels[indiceori]],-1)
+                        eigva_norm = np.concatenate([eigva_norm,node_labels[indiceori][0]*0],-1)
+                        
                     num_zeros = maxdimensions-dims[0]   
                     n_nodes = dims[0]
     
@@ -196,17 +211,69 @@ class LaplacianDatasetNX(Dataset):
         train_evecs = torch.stack([self.samples[i][1] for i in train_set],0)
         train_evals = torch.stack([self.samples[i][2] for i in train_set],0)
         
-        Lscaler = sklearn.preprocessing.StandardScaler()
+        if scaler=="standard":
+            scaler_class = sklearn.preprocessing.StandardScaler
+        if scaler=="minmax":
+            scaler_class = lambda : sklearn.preprocessing.MinMaxScaler((-1,1))
+
+        
+        Lscaler = scaler_class()
         Lscaler.fit(train_evals)
         
-        Wscaler = sklearn.preprocessing.StandardScaler()
+        Wscaler = scaler_class()
         Wscaler.fit(train_evecs.reshape(-1,train_evecs.shape[-1]))
                 
-        self.wm = torch.tensor(Wscaler.mean_)[None,:].float()
-        self.ws = torch.tensor(Wscaler.var_)[:].float()**0.5
+            
+        if scaler=="standard":
+            def scale_xy(self,x,y):
+                wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
+                x = (x-wm_)/ws_
+                y = (y-lm_)/ls_
+                return x,y
 
-        self.lm = torch.tensor(Lscaler.mean_)[:].float()
-        self.ls = torch.tensor(Lscaler.var_)[:].float()**0.5
+            def unscale_xy(self,x,y):
+                wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
+                x = x*ws_ + wm_
+                y = y*ls_ + lm_
+                return x,y
+            
+            self.scale_xy = MethodType(scale_xy,self)
+            self.unscale_xy = MethodType(unscale_xy,self)
+            
+            self.wm = torch.tensor(Wscaler.mean_)[None,:].float()
+            self.ws = torch.tensor(Wscaler.var_)[:].float()**0.5+1e-12
+
+            self.lm = torch.tensor(Lscaler.mean_)[:].float()
+            self.ls = torch.tensor(Lscaler.var_)[:].float()**0.5+1e-12
+
+        elif scaler=='minmax':
+            
+            def scale_xy(self,x,y):
+                wm_,wr_,lm_,lr_ = [t.to(x.device) for t in [self.wm,self.wr,self.lm,self.lr]]
+                x = (x-wm_)/wr_*2-1
+                y = (y-lm_)/lr_*2-1
+                return x,y
+
+            
+            def unscale_xy(self,x,y):
+                wm_,wr_,lm_,lr_ = [t.to(x.device) for t in [self.wm,self.wr,self.lm,self.lr]]
+                x = wr_*(x+1)/2 + wm_
+                y = lr_*(y+1)/2 + lm_
+                return x,y
+            
+#             setattr(LaplacianDatasetNX, 'scale_xy',scale_xy)
+#             setattr(LaplacianDatasetNX, 'unscale_xy',unscale_xy)
+            self.scale_xy = MethodType(scale_xy,self)
+            self.unscale_xy = MethodType(unscale_xy,self)
+            
+            self.wm = torch.tensor(Wscaler.data_min_)[None,:].float()
+            self.wr = torch.tensor(Wscaler.data_range_)[:].float()+1e-12
+
+            self.lm = torch.tensor(Lscaler.data_min_)[:].float()
+            self.lr = torch.tensor(Lscaler.data_range_)[:].float()+1e-12
+        else:
+            raise("Unsupported scaling method")
+        
         
         self.n_max = self.samples[0][1].shape[0]
         self.n_dist = np.histogram([int(self.samples[i][4]) for i in train_set],self.n_max+1,range=(0,self.n_max+1),density=True)[0]
@@ -224,43 +291,71 @@ class LaplacianDatasetNX(Dataset):
         self.extra_data = False
         
     def compute_mmd_statistics(self,train_set,test_set):
-        #compute metrics
-        graph_test_list = [] #should be on test set graphs
-        for jj in range(len(test_set)):
-            laplacian_matrix = np.array(test_set[jj][3].cpu())[:test_set[jj][4],:test_set[jj][4]]
-            Aori = np.copy(laplacian_matrix)
-            np.fill_diagonal(Aori,0)
-            Aori= Aori*(-1)
-            graph_test_list.append(nx.from_numpy_array(Aori)) 
+        
+        print("compute graphs statistics")
+        compute_emd=False
+#         if len(train_set)>500:
+#             compute_emd=True
+            
+#         #compute metrics
+#         graph_test_list = [] #should be on test set graphs
+#         for jj in np.random.permutation(len(test_set))[:100]:
+#             laplacian_matrix = np.array(test_set[jj][3].cpu())[:test_set[jj][4],:test_set[jj][4]]
+#             Aori = np.copy(laplacian_matrix)
+#             np.fill_diagonal(Aori,0)
+#             Aori= Aori*(-1)
+#             graph_test_list.append(nx.from_numpy_array(Aori)) 
 
-        graph_train_list = []
-        for jj in range(len(train_set)):
-            laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
-            Aori = np.copy(laplacian_matrix)
-            np.fill_diagonal(Aori,0)
-            Aori= Aori*(-1)
-            graph_train_list.append(nx.from_numpy_array(Aori)) 
+#         graph_train_list = []
+#         for jj in np.random.permutation(len(train_set))[:100]:
+#             laplacian_matrix = np.array(train_set[jj][3].cpu())[:train_set[jj][4],:train_set[jj][4]]
+#             Aori = np.copy(laplacian_matrix)
+#             np.fill_diagonal(Aori,0)
+#             Aori= Aori*(-1)
+#             graph_train_list.append(nx.from_numpy_array(Aori)) 
 
-        self.degree = degree_stats( graph_test_list,graph_train_list, compute_emd=False)
-        self.cluster = clustering_stats( graph_test_list,graph_train_list, compute_emd=False)
-        self.spectral = spectral_stats(graph_test_list, graph_train_list)
+#         print("computing degree")        
+#         self.degree = degree_stats( graph_test_list,graph_train_list, compute_emd=compute_emd)
+#         print("computing cluster")
+#         self.cluster = clustering_stats( graph_test_list,graph_train_list, compute_emd=compute_emd)
+#         print("computing spectral")
+#         self.spectral = spectral_stats(graph_test_list, graph_train_list, compute_emd=compute_emd)
 
+        MAX_GRAPHS = 10000
+        train_set = [train_set[i] for i in np.random.permutation(len(train_set))[:MAX_GRAPHS]]
+        test_set = [test_set[i] for i in np.random.permutation(len(test_set))[:MAX_GRAPHS]]
+        
+        adj_list_train = [g[-1][:g[-2]][:,:g[-2]].cpu() for g in train_set]
+        adj_list_test = [g[-1][:g[-2]][:,:g[-2]].cpu() for g in test_set]
+
+        adj_list_train = [a[m,:][:,m] for a,m in zip(adj_list_train,[z.sum(-1)>0 for z in adj_list_train])] #remove isolated
+        adj_list_test = [a[m,:][:,m] for a,m in zip(adj_list_test,[z.sum(-1)>0 for z in adj_list_test])] #remove isolated
+
+
+        self.degree = degree_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
+        print("computing degree: ",self.degree)        
+        self.cluster = clustering_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
+        print("computing cluster: ",self.cluster)
+        self.spectral = spectral_stats(adj_list_test, adj_list_train, compute_emd=compute_emd)
+        print("computing spectral: ",self.spectral)
+        
+        
         
     def __len__(self):
         return len(self.samples)
 
     
-    def scale_xy(self,x,y):
-        wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
-        x = (x-wm_)/ws_
-        y = (y-lm_)/ls_
-        return x,y
+#     def scale_xy(self,x,y):
+#         wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
+#         x = (x-wm_)/ws_
+#         y = (y-lm_)/ls_
+#         return x,y
 
-    def unscale_xy(self,x,y):
-        wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
-        x = x*ws_ + wm_
-        y = y*ls_ + lm_
-        return x,y
+#     def unscale_xy(self,x,y):
+#         wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
+#         x = x*ws_ + wm_
+#         y = y*ls_ + lm_
+#         return x,y
     
     def sample_n_nodes(self, n):
         return np.random.choice(self.n_max+1, n, p=self.n_dist)
