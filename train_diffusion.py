@@ -41,7 +41,7 @@ def get_arg_parser():
 #     parser.add_argument('--end_lr', type=float, default=1e-5)
 #     parser.add_argument('--sched_start_epoch', type=int, default=100*THOUSAND)
 #     parser.add_argument('--sched_end_epoch', type=int, default=200*THOUSAND)
-    parser.add_argument('--max_epochs', type=int, default=100*THOUSAND)
+    parser.add_argument('--max_epochs', type=int, default=500*THOUSAND)
 
     # Training
     parser.add_argument('--seed', type=int, default=2020)
