@@ -83,7 +83,8 @@ class Powerful(nn.Module):
 
         self.no_prop = FeatureExtractor(hidden, hidden_final, activation=self.activation, spectral_norm=spectral_norm)
         self.in_lin = nn.Sequential(spectral_norm(nn.Linear(input_features, hidden)))
-        self.layer_cat_lin = nn.Sequential(spectral_norm(nn.Linear(hidden*(num_layers+1), hidden)))
+#         self.layer_cat_lin = nn.Sequential(spectral_norm(nn.Linear(hidden*(num_layers+1), hidden)))
+        self.layer_cat_lin = nn.Sequential(spectral_norm(nn.Linear(hidden, hidden)))
         self.convs = nn.ModuleList([])
         self.bns = nn.ModuleList([])
         for i in range(num_layers):
@@ -103,7 +104,8 @@ class Powerful(nn.Module):
         self.final_lin = nn.Sequential(spectral_norm(nn.Linear(hidden_final, output_features)))
 
         if self.node_out:
-            self.layer_cat_lin_node = nn.Sequential(spectral_norm(nn.Linear(hidden*(num_layers+1), hidden)))
+#             self.layer_cat_lin_node = nn.Sequential(spectral_norm(nn.Linear(hidden*(num_layers+1), hidden)))
+            self.layer_cat_lin_node = nn.Sequential(spectral_norm(nn.Linear(hidden, hidden)))
             if self.layer_after_conv:
                 self.after_conv_node = nn.Sequential(spectral_norm(nn.Linear(hidden_final, hidden_final)))
             self.final_lin_node = nn.Sequential(spectral_norm(nn.Linear(hidden_final, node_output_features)))
@@ -143,7 +145,10 @@ class Powerful(nn.Module):
             u = mask[:,:,None,:] * u * mask[:,None,:,:] # Unnecessary with instance norm
             out.append(u)
         del u
-        out = torch.cat(out, dim=-1)
+        
+#         out = torch.cat(out, dim=-1)
+        out = out[-1]
+        
         if self.node_out and self.adj_out:
             node_out = self.layer_cat_lin_node(out.diagonal(dim1=1, dim2=2).transpose(-2,-1))
             if self.layer_after_conv:

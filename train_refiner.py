@@ -44,8 +44,8 @@ def get_arg_parser():
     parser.add_argument('--rec_weight', type=float, default=1e-1)
     
     # Diffusion generation
-    parser.add_argument('--n_graphs_train', type=int, default=512)
-    parser.add_argument('--n_graphs_test', type=int, default=128)
+    parser.add_argument('--n_graphs_train', type=int, default=51)
+    parser.add_argument('--n_graphs_test', type=int, default=12)
     
     #optimizaation
     parser.add_argument('--device', type=str, default="cuda")
@@ -64,17 +64,19 @@ if __name__ == "__main__":
 #     seed_all(args.seed)
     
     
+    
     #################### load diffusion_model ##############################
     diffusion_model_path = glob.glob(f'graph_diffusion_perceptron/{args.diffusion_model}/checkpoints/epoch*.ckpt')[0]
     model = Transformer.load_from_checkpoint(diffusion_model_path)
 
     model.hparams.update(args.__dict__)
     args = model.hparams
-
+    args.qm9 = args.dataset[:3] in ["qm9"]
+    
 
     ################### load real graphs training set ######################
-    graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train')
-    graphs_test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test')
+    graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', nodefeatures=args.dataset[:3] in ["qm9"])
+    graphs_test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', nodefeatures=args.dataset[:3] in ["qm9"])
 
     graphs_train_set.get_extra_data(False)
 
@@ -82,10 +84,16 @@ if __name__ == "__main__":
     real_eval = torch.stack([t[1] for t in graphs_train_set],0)
     real_evec = torch.stack([t[0] for t in graphs_train_set],0)
     real_adj = torch.stack([t[-1][0] for t in graphs_train_set],0)
+    
+    real_emask = torch.stack([t[3] for t in graphs_train_set],0)
+    real_edge_features = torch.stack([t[4] for t in graphs_train_set],0)
 
     real_evec,real_eval = graphs_train_set.unscale_xy(real_evec,real_eval)
+    real_evec *= real_emask[:,None,:] 
+    real_eval *= real_emask           
 
-    train_set = torch.utils.data.TensorDataset(real_evec,real_eval,real_adj)
+
+    train_set = torch.utils.data.TensorDataset(real_evec,real_eval,real_adj,real_edge_features)
     train_dataloader = DataLoader(train_set, batch_size=16, shuffle=True, num_workers=0,pin_memory=True)
     
     
@@ -95,7 +103,7 @@ if __name__ == "__main__":
     n_graphs = args.n_graphs_train + args.n_graphs_test
     n_nodes = list(graphs_train_set.sample_n_nodes(n_graphs-1)) + [graphs_train_set.n_max]
 
-    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=16, reproject=True)
+    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=16, reproject=True)
     generations_x = generations_x.cpu()
     generations_y = generations_y.cpu()
 
@@ -105,8 +113,8 @@ if __name__ == "__main__":
     del model
     # torch.save([generations_dataset,generations_dataset_val],"tmp.data")
 
-    dataloader = DataLoader(ConcatDataset(train_set,generations_dataset), batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=False)
-    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=False)
+    dataloader = DataLoader(ConcatDataset(train_set,generations_dataset), batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=True)
+    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=True)
 
     ###################################
     args.n_max = graphs_train_set.n_max

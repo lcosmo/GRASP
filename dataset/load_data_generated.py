@@ -68,29 +68,26 @@ class LaplacianDatasetNX(Dataset):
         self.label = []
 #         folder = '/home/lcosmo/GIORGIA/'
 
-        filename = f"{ds_filename}_{point_dim}_sm{smallest}_sc{scaler}.torch"
+        filename = f"{ds_filename}_{point_dim}_sm{smallest}_sc{scaler}_v08.torch"
         if not os.path.isfile(filename):
             with open( ds_filename+'.pkl', "rb") as f:
-    #         with open(folder+'/'+filename+'.pkl', "rb") as f:
                  graph_list = pickle.load(f)
             
+            graph_list = graph_list
             print('Comp dimensions...')
             
-            indices = []     
-            
-            maxdimensions = 1
-            mindimensions = point_dim
-            for ids in range(len(graph_list)):     
-                
-                nodelist = graph_list[ids].number_of_nodes()   
-                
-                if  nodelist<point_dim:
-                       print("Too few nodes")
-                       continue   
-                else:                                  
-                    indices.append(ids)                
-                    maxdimensions = max(maxdimensions,(nodelist))
+#             indices = []                 
+#             maxdimensions = 1
+#             mindimensions = point_dim
+#             for ids in range(len(graph_list)):     
+#                 nodelist = graph_list[ids].number_of_nodes()   
+#                 indices.append(ids)                
+#                 maxdimensions = max(maxdimensions,(nodelist))
     
+            indices = list(range(len(graph_list)))
+            maxdimensions = max(g.number_of_nodes() for g in graph_list)
+            print(f"Max # nodes: {maxdimensions}")
+            
             print('Comp stats...')
             ori_eigenvalues = []       
             eigen_dic = defaultdict(dict)
@@ -110,10 +107,7 @@ class LaplacianDatasetNX(Dataset):
                     dims = (nx.adjacency_matrix(H)).shape    
                     adj = nx.adjacency_matrix(H).todense()
                     lap = laplacian(adj)                
-                    w, v = LA.eig(lap)
-    
-                    if any(np.iscomplex(w)):
-                        w = np.array( [bb.real for bb in w])
+                    w, v = LA.eigh(lap)
     
                     eigen_dic[ids]['w']=w
                     eigen_dic[ids]['v']=v
@@ -121,12 +115,6 @@ class LaplacianDatasetNX(Dataset):
                     eigen_dic[ids]['lap']=lap
                     eigen_dic[ids]['A']=adj
     
-    
-    #                 eigva_ids_sort = w.argsort()[::-1]# descending order  
-    #                 eigva = w[eigva_ids_sort]        
-    #                 eigva = eigva[:point_dim] 
-    #                 ori_eigenvalues.append(eigva)
-                
 #                 torch.save(eigen_dic,ds_filename+'.eigen')
             
             self.mu = 0#mu
@@ -137,71 +125,78 @@ class LaplacianDatasetNX(Dataset):
             ids_list = eigen_dic.keys()
             
             
+            self.edge_features = 0
+            self.node_features = 0
+            edge_labels = [None]*len(graph_list)
             if nodefeatures:
                 node_labels = [torch.tensor([G.nodes[i]['x'] for i in range(len(G.nodes))]) for G in graph_list]
                 num_labels = torch.cat(node_labels,-1).max()+1
                 node_labels = [torch.nn.functional.one_hot(l, num_labels) for l in node_labels]
-
-
+                self.node_features = num_labels
+                
+                num_labels = max([max([e['e'] for e in g.edges.values()]) for g in graph_list])+1
+                edge_labels = [[(k,e['e']) for k,e in g.edges.items()] for g in graph_list]
+                self.edge_features = num_labels
+                
             for ids,indiceori in enumerate(indices): 
                 label = []
      
-                if ids not in ids_list:
-                              print('ERRRRRROR')
-                              quit()
+                w = eigen_dic[ids]['w']
+                v = eigen_dic[ids]['v']
+                dims = eigen_dic[ids]['dims']
+                lap = eigen_dic[ids]['lap'] 
+                A = eigen_dic[ids]['A']
+
+                eigva_ids_sort = w.argsort()[::-1]# descending order  
+                eigva = w[eigva_ids_sort]
+
+                if not smallest:
+                    eigva = eigva[:point_dim]
                 else:
-    
-                    w = eigen_dic[ids]['w']
-                    v = eigen_dic[ids]['v']
-                    dims = eigen_dic[ids]['dims']
-                    lap = eigen_dic[ids]['lap'] 
-                    A = eigen_dic[ids]['A']
+                    eigva = eigva[-(1+point_dim):-1]
+
+                eigva_norm = eigva#np.zeros(eigva.shape)
+
+#                 for jj,value in enumerate(eigva):                      
+#                       eigva_norm[jj] = minmax_norm(value, maxval[jj], minval[jj] ) 
+
+                if not smallest:
+                    eigvec = v[:,eigva_ids_sort][:,:point_dim] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
+                else:
+                    eigvec = v[:,eigva_ids_sort][:,-point_dim:] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
+
+                ################ if the graph is smaller than point_dim, add leading zero evals and evecs #############
+                k = eigvec.shape[-1]
+                left_pad = point_dim-k
                     
+                eigvec = np.pad(eigvec, ((0,0),(left_pad, 0)), mode='constant')    
+                eigva_norm = np.pad(eigva_norm, ((left_pad, 0)), mode='constant')    
                     
-    
-                    eigva_ids_sort = w.argsort()[::-1]# descending order  
-                    eigva = w[eigva_ids_sort]
-                    
-                    if not smallest:
-                        eigva = eigva[:point_dim]
-                    else:
-                        eigva = eigva[-(1+point_dim):-1]
-                    
-                    eigva_norm = eigva#np.zeros(eigva.shape)
-    
-    #                 for jj,value in enumerate(eigva):                      
-    #                       eigva_norm[jj] = minmax_norm(value, maxval[jj], minval[jj] ) 
-    
-                    if not smallest:
-                        eigvec = v[:,eigva_ids_sort][:,:point_dim] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
-                    else:
-                        eigvec = v[:,eigva_ids_sort][:,-point_dim:] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
-                        
-                        
-                    ################ if we have labels, append them to eigenvectos ###################
-                    if nodefeatures:
-                        eigvec = np.concatenate([eigvec,node_labels[indiceori]],-1)
-                        eigva_norm = np.concatenate([eigva_norm,node_labels[indiceori][0]*0],-1)
-                        
-                    num_zeros = maxdimensions-dims[0]   
-                    n_nodes = dims[0]
-    
-                    arr_pad = np.pad(lap, [(0, num_zeros), (0, num_zeros)], mode='constant')  
-                    
-                    eigvec = np.pad(eigvec, [(0, num_zeros), (0, 0)], mode='constant')    
-                    A = np.pad(A, [(0, num_zeros), (0, num_zeros)], mode='constant')  
-                    
-                    self.samples.append((torch.tensor(label).float(),torch.tensor(eigvec).float(),
-                                         torch.tensor(eigva_norm).float(),torch.tensor(arr_pad).float(),
-                                         torch.tensor(n_nodes),torch.tensor(A).float()))
+                ################ if we have labels, append them to eigenvectos ###################
+                if nodefeatures:
+                    eigvec = np.concatenate([eigvec,node_labels[indiceori]],-1)
+                    eigva_norm = np.concatenate([eigva_norm,node_labels[indiceori][0]*0],-1)
+
+                num_zeros = maxdimensions-dims[0]   
+                n_nodes = dims[0]
+
+                arr_pad = np.pad(lap, [(0, num_zeros), (0, num_zeros)], mode='constant')  
+
+                eigvec = np.pad(eigvec, [(0, num_zeros), (0, 0)], mode='constant')    
+                A = np.pad(A, [(0, num_zeros), (0, num_zeros)], mode='constant')  
+
+                self.samples.append((torch.tensor(label).float(),torch.tensor(eigvec).float(),
+                                     torch.tensor(eigva_norm).float(),torch.tensor(arr_pad).float(),
+                                     edge_labels[indiceori],torch.tensor(n_nodes),torch.tensor(A).float()))
             
             print('SAVING Tot #{}'.format(len(self.samples))  )
-            torch.save(self.samples,filename)
+            torch.save((self.samples,self.edge_features,self.node_features),filename)
         else:
-            self.samples = torch.load(filename)
+            self.samples,self.edge_features,self.node_features = torch.load(filename)
             
         print('Tot #{}'.format(len(self.samples))  )
-        
+ 
+            
         #train test
         test_len = int(len(self.samples)*0.2)
         train_len = len(self.samples) - test_len
@@ -276,7 +271,7 @@ class LaplacianDatasetNX(Dataset):
         
         
         self.n_max = self.samples[0][1].shape[0]
-        self.n_dist = np.histogram([int(self.samples[i][4]) for i in train_set],self.n_max+1,range=(0,self.n_max+1),density=True)[0]
+        self.n_dist = np.histogram([int(self.samples[i][-2]) for i in train_set],self.n_max+1,range=(0,self.n_max+1),density=True)[0]
 
         if split == 'train':
             self.compute_mmd_statistics([self.samples[i] for i in train_set], [self.samples[i] for i in test_set])
@@ -365,17 +360,35 @@ class LaplacianDatasetNX(Dataset):
         
     def __getitem__(self, idx):
         
-        class_id, eigevc_tensor, eigva_tensor, lap_tensor,n_nodes,A = self.samples[idx] 
+        class_id, eigevc_tensor, eigva_tensor, lap_tensor,edge_labels,n_nodes,A = self.samples[idx] 
         
         eigevc_tensor,eigva_tensor = self.scale_xy(eigevc_tensor,eigva_tensor)
 
+        
+        node_mask = torch.zeros(eigevc_tensor.shape[0])
+        node_mask[:n_nodes] = 1
+        eigevc_tensor[n_nodes:,:] = 0
+        
+        evec_mask = torch.ones(eigevc_tensor.shape[-1])
+       
+        
+        if n_nodes<self.point_dim:
+            zero_pad = self.point_dim-n_nodes
+            eigevc_tensor[:,:zero_pad]=0
+            eigva_tensor[:zero_pad]=0
+            evec_mask[:zero_pad]=0
+
+        E = torch.tensor(0)
+        if edge_labels is not None:
+            E = torch.zeros(node_mask.shape[0],node_mask.shape[0],self.edge_features) 
+            for (i,j),v in edge_labels:
+                E[i,j,v]=1
+                E[j,i,v]=1
+            
         if self.extra_data:
-            return eigevc_tensor, eigva_tensor, class_id[None,:],lap_tensor,n_nodes,A[None,:]
+            return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
         
-        m = torch.zeros(eigevc_tensor.shape[0])
-        m[:n_nodes] = 1
-        
-        return eigevc_tensor, eigva_tensor, m#,A[None,:]
+        return eigevc_tensor, eigva_tensor, node_mask, evec_mask
     
 # import sys, inspect
 # def print_classes():

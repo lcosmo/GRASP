@@ -30,12 +30,16 @@ class Transformer(L.LightningModule):
         self.save_hyperparameters(hparams)
         self.args = self.hparams
         
+        #retrocompatibility check
+        if not hasattr(self.args, 'feature_size'):
+            self.args.feature_size = 0
+        
         self.diffusion = PointwiseNet(self.args.k+self.args.feature_size, args = self.args)
         self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000, clip_sample=False,beta_schedule='linear')
         
         self.automatic_optimization = False
         
-    def get_loss(self, x, y, m, writer=None):
+    def get_loss(self, x, y, m, em, writer=None):
           
         bs = x.shape[0]
 
@@ -52,12 +56,12 @@ class Transformer(L.LightningModule):
         noisy_x = self.noise_scheduler.add_noise(x, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.diffusion(noisy_x, timesteps/1000.0, m)
+        noise_pred = self.diffusion(noisy_x*em[:,None,:], timesteps/1000.0, m)
 
         assert(not torch.isnan(noise_pred).any())
         m = torch.nn.functional.pad(m,(0,1),value=1)[...,None]
 
-        loss = (F.mse_loss(noise_pred, noise,reduction='none')*m).sum()/(m.sum()*noise.shape[-1])
+        loss = (F.mse_loss(noise_pred, noise,reduction='none')*m*em[:,None,:]).sum()/(m.sum()*em.sum(-1).mean())
 
         return loss
     
@@ -77,39 +81,48 @@ class Transformer(L.LightningModule):
         
         noise = torch.randn(batch_size,max_points,point_dim).to(device) *  self.noise_scheduler.init_noise_sigma
 
+        em = noise[:,0,:]*0+1
+        if (max_points-1)<self.hparams.k:
+            em[:,:self.hparams.k-max_points+1]=0
+            
         m_all = noise*0+1        
         if isinstance(num_points,list):        
             for i,n in enumerate(num_points):
-                m_all[i,n:-1,:] = 0                
+                m_all[i,n:-1,:] = 0  
+                if n<self.hparams.k:
+                    em[i,:self.hparams.k-n]=0
+     
         m = m_all[:,:-1,0]
+        
+        noise = noise * em[:,None,:]
         
         scheduler.set_timesteps(sampling_steps)
         for t in scheduler.timesteps:
             with torch.no_grad():
                 t_ = t[None].repeat(noise.shape[0]).to(noise.device)
                 noisy_residual = self.diffusion(noise, t_/1000, m)
-            
+                previous_noisy_sample = scheduler.step(noisy_residual, t, noise).prev_sample
 
         #     reproject to orthonormal bases
-            if reproject and t<sampling_steps*0.1:
+            if reproject and t<100:
                 M = scheduler.step(noisy_residual, t, noise).pred_original_sample*m_all
                 M,yy = unscale_xy(M[:,:-1,],M[:,-1,:])
                 
                 padsize = M.shape[-1]-self.hparams.k
-                M = M[:,:,:self.hparams.k]
-                yy = yy[:,:self.hparams.k]
+                M = M[:,:,:self.hparams.k]*em[:,None,:self.hparams.k]
+                yy = yy[:,:self.hparams.k]*em[:,:self.hparams.k]
                 
                 svd = torch.svd(M[:,:])
                 orth = svd.U@svd.V.transpose(-1,-2)
+                
                 grad = scale_xy(torch.nn.functional.pad(orth-M,(0,padsize)),torch.nn.functional.pad(yy,(0,padsize)))[0]
                 previous_noisy_sample[:,:-1,:self.hparams.k] += 1e-2*grad.to(previous_noisy_sample.device)[:,:,:self.hparams.k]
-            else:
-                previous_noisy_sample = scheduler.step(noisy_residual, t, noise).prev_sample
+                
 
-            noise = previous_noisy_sample*m_all
+            noise = previous_noisy_sample*m_all*em[:,None,:]
     
         ################################
-        return noise
+        return noise,  m_all, em
 
     
     def configure_optimizers(self):
@@ -134,13 +147,14 @@ class Transformer(L.LightningModule):
         x = batch[0].float()
         y = batch[1].float()
         m = batch[2].float()
+        em = batch[3].float()
         
         
 
         # Forward
 #         if not self.hparams.use_mask:
 #             m=1
-        loss = self.get_loss(x, y, m=m)
+        loss = self.get_loss(x, y, m=m, em=em)
 
         # Backward and optimize
         loss.backward()
@@ -179,13 +193,15 @@ class Transformer(L.LightningModule):
         # Sample eigenvectors and eigenvalues
         gen_pcs = []
         with torch.no_grad():
-            x = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device, reproject=reproject)
-            samples_EIGVEC = x.detach().cpu()        
+            x,m,em = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device, reproject=reproject)
+            samples_EIGVEC = x.detach()#.cpu()        
             xx = samples_EIGVEC[:,:-1,:]
             yy = samples_EIGVEC[:,-1:,:]
             
             xx,yy = unscale_xy(xx,yy)
-            yy=yy.float()
+            
+            xx = xx*m[:,:-1,:]*em[:,None,:]
+            yy = yy.float()*em[:,None,:]
         return xx,yy
     
     
@@ -193,18 +209,21 @@ class Transformer(L.LightningModule):
         # Sample eigenvectors and eigenvalues
         gen_pcs = []
         with torch.no_grad():
-            x = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device)
+            x,m,em = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device)
             samples_EIGVEC = x.detach().cpu()
 
         # reconstruct laplacian matrix
         recon_list = []
-        for i,X in enumerate(samples_EIGVEC.cpu()):
-            xx = X[:-1,:]
+        for i,(X,gm,gem) in enumerate(zip(samples_EIGVEC.cpu(),m.cpu(),em.cpu())):
+            n_nodes = int(np.round(gm[:,0].sum())-1)
+            n_pad = int(np.round((1-gem).sum()))               
+                  
+            xx = X[:n_nodes,:]
             yy = X[-1:,:]
-
+            
             xx,yy = unscale_xy(xx,yy)
-            xx = xx[:,:self.hparams.k]
-            yy = yy[:,:self.hparams.k]
+            xx = xx[:,n_pad:self.hparams.k]
+            yy = yy[:,n_pad:self.hparams.k]
             
             yy=yy.float()
 

@@ -69,7 +69,7 @@ class PPGNGenerator(nn.Module):
 
         self.powerful = Powerful(num_layers=n_layers, input_features=self.input_features, hidden=data_channels, hidden_final=data_channels,
                                 dropout_prob=dropout, simplified=False, n_nodes=self.n_max, normalization=normalization, adj_out=True,
-                                output_features=output_features, residual=False, activation=activation, spectral_norm=spectral_norm,
+                                output_features=output_features, residual=True, activation=activation, spectral_norm=spectral_norm,
                                 node_out=self.qm9, node_output_features=4)
 
         for name, m in self.named_modules():
@@ -96,10 +96,12 @@ class PPGNGenerator(nn.Module):
         
         if not self.no_cond:
             if self.use_fixed_emb:
+                assert(Fasle,"should not use this")
                 node_embeddings = self.embedding(torch.arange(mask.size(1), device=n.device, dtype=torch.long)).unsqueeze(0).expand(mask.size(0), -1, -1).clone()
             else:
                 node_embeddings = eigvec[:,:,:self.k_eigval]
             if self.cat_eigvals or self.cat_mult_eigvals:
+                assert(Fasle,"should not use this")
                 x.append(eigval[:,:self.k_eigval].unsqueeze(1).expand_as(node_embeddings))
             if not self.cat_eigvals and not self.use_fixed_emb:
                 eigval = eigval.clone()
@@ -111,21 +113,28 @@ class PPGNGenerator(nn.Module):
         del node_noise
         
         if self.use_fixed_emb or self.no_cond:
-            aaaaa # fix mask
+            assert(Fasle,"should not use this")
             adj = torch.zeros_like(mask)
         elif self.cat_eigvals:
+            assert(Fasle,"should not use this")
             adj = (node_embeddings * eigval[:,:self.k_eigval].unsqueeze(1).expand_as(node_embeddings)) @ node_embeddings.transpose(-2,-1)
         else:
             adj = node_embeddings @ node_embeddings.transpose(-2,-1)
 
+            
+#             L = get_adj(noisy_gen_eigvec[i],noisy_gen_eigval[i])
+        L = adj
+        D = 1/L.diagonal(dim1=-2, dim2=-1).sqrt()
+        adj = 1-D[:,:,None]*L*D[:,None,:]
+
+            
         if not self.no_cond:
             del node_embeddings
 
         if self.qm9:
             adj, node_features = self.powerful(adj, x, mask)
 
-            aaaaa # fix mask
-            node_features = node_features * mask[:,:,0].unsqueeze(-1)
+            node_features = node_features.softmax(-1) * mask[:,:,None]
             adj = (adj + adj.transpose(1, 2)) / 2
             adj = adj.softmax(-1)
 
@@ -139,7 +148,8 @@ class PPGNGenerator(nn.Module):
                 print('adj', adj.isnan().any())
 
             edge_features = edge_features * (1 - torch.eye(edge_features.size(1), edge_features.size(2), device=edge_features.device).view(1, edge_features.size(1), edge_features.size(2), 1).expand_as(edge_features))
-            edge_features = edge_features * mask.unsqueeze(-1).expand_as(edge_features)
+            
+            edge_features = mask[:,None,:,None] * edge_features * mask[:,:,None,None]
 
             return adj, node_features, edge_features
         else:
@@ -156,7 +166,7 @@ class PPGNGenerator(nn.Module):
             if adj.isnan().any():
                 print('adj', adj.isnan().any())
 
-            return adj
+            return adj, None, None
 
 
 class MLPGenerator(nn.Module):
@@ -289,7 +299,7 @@ class MLPGenerator(nn.Module):
             if adj.isnan().any():
                 print('adj', adj.isnan().any())
 
-            return adj
+            return adj, None, None
 
 
 class PPGNDiscriminator(nn.Module):
@@ -350,7 +360,7 @@ class PPGNDiscriminator(nn.Module):
         
         self.powerful = Powerful(num_layers=n_layers, input_features=input_features, hidden=data_channels, hidden_final=data_channels,
                                 dropout_prob=dropout, simplified=False, n_nodes=self.n_max, normalization=self.normalization,
-                                residual=False, activation=activation, spectral_norm=spectral_norm)
+                                residual=True, activation=activation, spectral_norm=spectral_norm)
         
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -371,13 +381,13 @@ class PPGNDiscriminator(nn.Module):
         # Normalize n by n_max for use as features
         n = n/self.n_max
 
-        eigval = eigval[:, :self.k_eigval]
-        eigvec = eigvec[:, :, :self.k_eigval]
+        eigval = eigval[:, :self.k_eigval]*0+n
+        eigvec = eigvec[:, :, :self.k_eigval]*0+n
 
-        if self.partial_laplacian:
-            lap = (eigvec * eigval.unsqueeze(1).expand_as(eigvec)) @ eigvec.transpose(-2,-1)
-            adj = torch.stack([adj, lap], dim=-1)
-            del lap
+#         if self.partial_laplacian:
+#             lap = (eigvec * eigval.unsqueeze(1).expand_as(eigvec)) @ eigvec.transpose(-2,-1)
+#             adj = torch.stack([adj, lap], dim=-1)
+#             del lap
 
         x = n
         if not self.no_cond:
