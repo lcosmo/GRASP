@@ -381,8 +381,8 @@ class PPGNDiscriminator(nn.Module):
         # Normalize n by n_max for use as features
         n = n/self.n_max
 
-        eigval = eigval[:, :self.k_eigval]*0+n
-        eigvec = eigvec[:, :, :self.k_eigval]*0+n
+        eigval = eigval[:, :self.k_eigval]*0
+        eigvec = eigvec[:, :, :self.k_eigval]*0
 
 #         if self.partial_laplacian:
 #             lap = (eigvec * eigval.unsqueeze(1).expand_as(eigvec)) @ eigvec.transpose(-2,-1)

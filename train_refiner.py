@@ -42,6 +42,7 @@ def get_arg_parser():
     parser.add_argument('--discriminator_layers', type=int, default=4)
     parser.add_argument('--discriminator_data_channels', type=int, default=32)
     parser.add_argument('--rec_weight', type=float, default=1e-1)
+    parser.add_argument('--val_check_interval', type=int, default=500)
     
     # Diffusion generation
     parser.add_argument('--n_graphs_train', type=int, default=51)
@@ -53,7 +54,6 @@ def get_arg_parser():
     
     parser.add_argument('--max_epochs', type=int, default=10000)
     parser.add_argument('--lr', type=float, default=1e-5)
-    parser.add_argument('--check_val_every_n_epoch', type=int, default=20)
     parser.add_argument('--seed', type=int, default=2023)
     
     
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         callbacks=[checkpoint_callback, early_stop_callback],
         logger=wandb_logger,
         log_every_n_steps=len(dataloader),
-        check_val_every_n_epoch = args.check_val_every_n_epoch,
+        check_val_every_n_epoch = None,
         max_epochs = args.max_epochs
     )
 
