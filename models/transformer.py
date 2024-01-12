@@ -66,7 +66,7 @@ class Transformer(L.LightningModule):
         return loss
     
 
-    def sample(self, num_points, batch_size, flexibility, point_dim, scale_xy, unscale_xy, sampling_steps=100, device='cuda',reproject=True):
+    def sample(self, num_points, batch_size, flexibility, point_dim, scale_xy, unscale_xy, sampling_steps=100, device='cuda',reproject=False):
 #         train_set = self.trainer.train_dataloader.dataset.datasets
 #         test_set = self.trainer.val_dataloaders[0].dataset
         
@@ -116,7 +116,7 @@ class Transformer(L.LightningModule):
                 orth = svd.U@svd.V.transpose(-1,-2)
                 
                 grad = scale_xy(torch.nn.functional.pad(orth-M,(0,padsize)),torch.nn.functional.pad(yy,(0,padsize)))[0]
-                previous_noisy_sample[:,:-1,:self.hparams.k] += 1e-2*grad.to(previous_noisy_sample.device)[:,:,:self.hparams.k]
+                previous_noisy_sample[:,:-1,:self.hparams.k] += 1e-1*grad.to(previous_noisy_sample.device)[:,:,:self.hparams.k]
                 
 
             noise = previous_noisy_sample*m_all*em[:,None,:]
@@ -189,29 +189,45 @@ class Transformer(L.LightningModule):
         self.log('spectral',  torch.tensor(spectral).float(), on_step=False, on_epoch=True)
 
         
-    def sample_eigs(self, max_nodes, num_eigs, scale_xy, unscale_xy, num_graphs=1024, device='cuda', reproject=True):
+    def sample_eigs(self, max_nodes, num_eigs, scale_xy, unscale_xy, num_graphs=256, oversample_mult=4, device='cuda', sampling_steps=100, reproject=False):
         # Sample eigenvectors and eigenvalues
+        assert(type(max_nodes) is list)
+        
         gen_pcs = []
         with torch.no_grad():
-            x,m,em = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device, reproject=reproject)
+            x,m,em = self.sample(max_nodes*oversample_mult, num_graphs*oversample_mult, 1, num_eigs, scale_xy, unscale_xy, device=device, sampling_steps=sampling_steps, reproject=reproject)
+            
             samples_EIGVEC = x.detach()#.cpu()        
-            xx = samples_EIGVEC[:,:-1,:]
-            yy = samples_EIGVEC[:,-1:,:]
+            xx = samples_EIGVEC[:,:-1,:self.hparams.k]
+            yy = samples_EIGVEC[:,-1:,:self.hparams.k]
             
             xx,yy = unscale_xy(xx,yy)
             
             xx = xx*m[:,:-1,:]*em[:,None,:]
             yy = yy.float()*em[:,None,:]
+            
+            #keep best generations
+            score = (xx.transpose(-1,-2)@xx - em[:,None,:]*torch.eye(xx.shape[-1],device=xx.device)[None].repeat(xx.shape[0],1,1)*em[:,:,None] ).pow(2).sum((-1,-2))/(em.sum(-1)**2)
+            
+            score_idx = score.argsort()
+            xx = xx[score_idx[:len(score_idx)//oversample_mult]]
+            yy = yy[score_idx[:len(score_idx)//oversample_mult]]
+
+            shuffle = torch.randperm(xx.shape[0])
+            xx = xx[shuffle]
+            yy = yy[shuffle]
+
         return xx,yy
     
     
-    def sample_graphs(self, max_nodes, num_eigs, scale_xy, unscale_xy, num_graphs=1024, device='cuda'):
+    def sample_graphs(self, max_nodes, num_eigs, scale_xy, unscale_xy, num_graphs=256, oversample_mult=4, device='cuda'):
         # Sample eigenvectors and eigenvalues
         gen_pcs = []
         with torch.no_grad():
-            x,m,em = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device)
+            x,m,em = self.sample(max_nodes, num_graphs*oversample_mult, 1, num_eigs, scale_xy, unscale_xy, device=device)
             samples_EIGVEC = x.detach().cpu()
 
+            
         # reconstruct laplacian matrix
         recon_list = []
         for i,(X,gm,gem) in enumerate(zip(samples_EIGVEC.cpu(),m.cpu(),em.cpu())):
@@ -227,22 +243,12 @@ class Transformer(L.LightningModule):
             
             yy=yy.float()
 
-            xx_o=xx
+            err = ((xx.t())@xx-torch.eye(xx.shape[-1])).norm() 
+            recon_list.append((err,L.numpy(),xx.t()@xx))
 
-            #orthogonal projection
-            if False:
-                U,s,V = torch.svd(xx)
-                xx_o = (U@V).float()
-
-            #discard samples that did not led to a quasi-orthonormal basis
-            L = (xx_o*yy)@xx_o.t()  
-            err = ((xx_o.t())@xx_o-torch.eye(xx.shape[-1])).norm()
-
-            recon_list.append((err,L.numpy(),xx_o.t()@xx_o))
-
-
-        LLLall  = [l[1] for l in sorted(recon_list, key=lambda e:e[0])][:]
-        LLLorth = [l[2] for l in sorted(recon_list, key=lambda e:e[0])][:]
+        #keep only best generations in therms of quasi-orthonormal basis
+        LLLall  = [l[1] for l in sorted(recon_list, key=lambda e:e[0])][:len(recon_list)//oversample_mult]
+        LLLorth = [l[2] for l in sorted(recon_list, key=lambda e:e[0])][:len(recon_list)//oversample_mult]
 
         #reconstruct graph
         graph_pred_list = []
