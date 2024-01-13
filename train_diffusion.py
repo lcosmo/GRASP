@@ -37,7 +37,7 @@ def get_arg_parser():
     # Optimizer and scheduler
     parser.add_argument('--batch_size', type=int, default=128)
 #     parser.add_argument('--max_grad_norm', type=float, default=10)
-    parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--lr', type=float, default=1e-4)
 #     parser.add_argument('--end_lr', type=float, default=1e-5)
 #     parser.add_argument('--sched_start_epoch', type=int, default=100*THOUSAND)
 #     parser.add_argument('--sched_end_epoch', type=int, default=200*THOUSAND)
@@ -46,7 +46,7 @@ def get_arg_parser():
     # Training
     parser.add_argument('--seed', type=int, default=2020)
     parser.add_argument('--device', type=str, default="cuda")
-    parser.add_argument('--val_check_interval', type=int, default=500)
+    parser.add_argument('--val_check_interval', type=int, default=1000)
 
     #Dataset & Score Model
     parser.add_argument('--model_tag', type=str, default='self-cross-hugg')
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     seed_all(args.seed)
     
     
-    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"])
+    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"], device="cpu")
     test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"])
     
     train_set.get_extra_data(False)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 #     train_set.dataset.set_scale(wm,ws,lm,ls)
 #     test_set.dataset.set_scale(wm,ws,lm,ls)
     
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=True)
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=False)
     valid_loader = DataLoader(test_set, batch_size=len(test_set), shuffle=False, num_workers=0,pin_memory=False)
 
     run_params=args

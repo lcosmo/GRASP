@@ -130,12 +130,13 @@ class Transformer(L.LightningModule):
             lr=self.args.lr
         )
 
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps = 500,
-            num_training_steps = self.hparams.train_loop_batches*self.hparams.max_epochs
-        )
-
+        # scheduler = get_cosine_schedule_with_warmup(
+        #     optimizer,
+        #     num_warmup_steps = 500,
+        #     num_training_steps = self.hparams.train_loop_batches*self.hparams.max_epochs
+        # )
+        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1, 0.05, self.hparams.max_epochs//2)
+        
         return {"optimizer": optimizer,  "lr_scheduler":scheduler}
 
     
@@ -161,13 +162,16 @@ class Transformer(L.LightningModule):
 
 #         orig_grad_norm = clip_grad_norm_(self.parameters(), self.hparams.max_grad_norm)
         optimizer.step()
-        scheduler.step()
 
         # Reset grad and model state
         optimizer.zero_grad()
         
         self.log('loss', loss.item(), on_step=False, on_epoch=True)
         self.log('lr', self.optimizers().param_groups[0]['lr'], on_step=False, on_epoch=True)
+
+    def training_epoch_end(self, outputs):
+        scheduler = self.lr_schedulers()
+        scheduler.step()
         
     def validation_step(self, batch, batch_idx):
         pass
@@ -243,6 +247,8 @@ class Transformer(L.LightningModule):
             
             yy=yy.float()
 
+            L = (xx*yy)@xx.t()
+            
             err = ((xx.t())@xx-torch.eye(xx.shape[-1])).norm() 
             recon_list.append((err,L.numpy(),xx.t()@xx))
 

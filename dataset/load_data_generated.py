@@ -59,8 +59,8 @@ from utils.eval_helper_torch import degree_stats, clustering_stats, spectral_sta
     
 
 class LaplacianDatasetNX(Dataset):
-    
-    def __init__(self,_folder,ds_filename,point_dim=7, smallest=True, split='all', scaler="standard", nodefeatures=False):
+     
+    def __init__(self,_folder,ds_filename,point_dim=7, smallest=True, split='all', scaler="standard", nodefeatures=False, device="cpu"):
         
         self.point_dim = point_dim
         self.samples = []
@@ -284,6 +284,44 @@ class LaplacianDatasetNX(Dataset):
                 
             
         self.extra_data = False
+
+    
+        ########################## prefetch #####################################
+        self.prefetched = []
+        for idx in range(len(self.samples)):
+            class_id, eigevc_tensor, eigva_tensor, lap_tensor,edge_labels,n_nodes,A = self.samples[idx] 
+        
+            eigevc_tensor,eigva_tensor = self.scale_xy(eigevc_tensor,eigva_tensor)
+    
+            
+            node_mask = torch.zeros(eigevc_tensor.shape[0])
+            node_mask[:n_nodes] = 1
+            eigevc_tensor[n_nodes:,:] = 0
+            
+            evec_mask = torch.ones(eigevc_tensor.shape[-1])
+           
+            
+            if n_nodes<self.point_dim:
+                zero_pad = self.point_dim-n_nodes
+                eigevc_tensor[:,:zero_pad]=0
+                eigva_tensor[:zero_pad]=0
+                evec_mask[:zero_pad]=0
+    
+            E = torch.tensor(0)
+            if edge_labels is not None:
+                E = torch.zeros(node_mask.shape[0],node_mask.shape[0],self.edge_features) 
+                for (i,j),v in edge_labels:
+                    E[i,j,v]=1
+                    E[j,i,v]=1
+
+            self.prefetched.append( (eigevc_tensor.to(device), eigva_tensor.to(device), node_mask.to(device), evec_mask.to(device), E, class_id[None,:],lap_tensor,n_nodes,A[None,:]) )
+            # if self.extra_data:
+            #     return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
+            # return eigevc_tensor, eigva_tensor, node_mask, evec_mask
+
+
+
+    
         
     def compute_mmd_statistics(self,train_set,test_set):
         
@@ -327,15 +365,16 @@ class LaplacianDatasetNX(Dataset):
         adj_list_test = [a[m,:][:,m] for a,m in zip(adj_list_test,[z.sum(-1)>0 for z in adj_list_test])] #remove isolated
 
 
+
+        ########################### dataset stats #####################
         self.degree = degree_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
         print("computing degree: ",self.degree)        
         self.cluster = clustering_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
         print("computing cluster: ",self.cluster)
         self.spectral = spectral_stats(adj_list_test, adj_list_train, compute_emd=compute_emd)
         print("computing spectral: ",self.spectral)
-        
-        
-        
+
+
     def __len__(self):
         return len(self.samples)
 
@@ -359,36 +398,39 @@ class LaplacianDatasetNX(Dataset):
         self.extra_data = flag
         
     def __getitem__(self, idx):
+        if self.extra_data:
+            return self.prefetched[idx]
+        else:
+            return self.prefetched[idx][:4]
+        # # class_id, eigevc_tensor, eigva_tensor, lap_tensor,edge_labels,n_nodes,A = self.samples[idx] 
         
-        class_id, eigevc_tensor, eigva_tensor, lap_tensor,edge_labels,n_nodes,A = self.samples[idx] 
-        
-        eigevc_tensor,eigva_tensor = self.scale_xy(eigevc_tensor,eigva_tensor)
+        # # eigevc_tensor,eigva_tensor = self.scale_xy(eigevc_tensor,eigva_tensor)
 
         
-        node_mask = torch.zeros(eigevc_tensor.shape[0])
-        node_mask[:n_nodes] = 1
-        eigevc_tensor[n_nodes:,:] = 0
+        # # node_mask = torch.zeros(eigevc_tensor.shape[0])
+        # # node_mask[:n_nodes] = 1
+        # # eigevc_tensor[n_nodes:,:] = 0
         
-        evec_mask = torch.ones(eigevc_tensor.shape[-1])
+        # # evec_mask = torch.ones(eigevc_tensor.shape[-1])
        
         
-        if n_nodes<self.point_dim:
-            zero_pad = self.point_dim-n_nodes
-            eigevc_tensor[:,:zero_pad]=0
-            eigva_tensor[:zero_pad]=0
-            evec_mask[:zero_pad]=0
+        # # if n_nodes<self.point_dim:
+        # #     zero_pad = self.point_dim-n_nodes
+        # #     eigevc_tensor[:,:zero_pad]=0
+        # #     eigva_tensor[:zero_pad]=0
+        # #     evec_mask[:zero_pad]=0
 
-        E = torch.tensor(0)
-        if edge_labels is not None:
-            E = torch.zeros(node_mask.shape[0],node_mask.shape[0],self.edge_features) 
-            for (i,j),v in edge_labels:
-                E[i,j,v]=1
-                E[j,i,v]=1
+        # # E = torch.tensor(0)
+        # # if edge_labels is not None:
+        # #     E = torch.zeros(node_mask.shape[0],node_mask.shape[0],self.edge_features) 
+        # #     for (i,j),v in edge_labels:
+        # #         E[i,j,v]=1
+        # #         E[j,i,v]=1
             
-        if self.extra_data:
-            return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
+        # if self.extra_data:
+        #     return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
         
-        return eigevc_tensor, eigva_tensor, node_mask, evec_mask
+        # return eigevc_tensor, eigva_tensor, node_mask, evec_mask
     
 # import sys, inspect
 # def print_classes():
