@@ -52,7 +52,7 @@ def get_arg_parser():
     parser.add_argument('--device', type=str, default="cuda")
     parser.add_argument('--batch_size', type=int, default=8)
     
-    parser.add_argument('--max_epochs', type=int, default=10000)
+    parser.add_argument('--max_epochs', type=int, default=50000)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=2020)
     
@@ -137,9 +137,11 @@ if __name__ == "__main__":
     wandb_logger = WandbLogger(
         name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_dm-{args.diffusion_model}",
         project="graph_diffusion_refinement",
-        entity="l_cosmo"
+        entity="l_cosmo",
+        offline=False
     )
-
+    
+    args.check_val_every_n_epoch = None
     trainer = pl.Trainer.from_argparse_args(
         args,
         accelerator="auto",
@@ -147,6 +149,7 @@ if __name__ == "__main__":
         logger=wandb_logger,
         log_every_n_steps=len(dataloader),
         check_val_every_n_epoch = None,
+        val_check_interval = args.val_check_interval,
         max_epochs = args.max_epochs
     )
 

@@ -496,4 +496,82 @@ class PointwiseNet(Module):
             return outfinal
         
         
+
+        
+    
+class PointwiseNet2(Module):
+    
+      def __init__(self, point_dim, out_emb_size, residual=False, args=None):
+          
+        super().__init__()
+        embdim = args.latent_dim
+        self.out_emb_size = out_emb_size
+        self.latent_dim = embdim
+        self.act = F.leaky_relu
+        
+        self.init_layer_PHI = nn.Sequential(nn.Linear(point_dim,point_dim),nn.LeakyReLU(),nn.Linear(point_dim,embdim))
+        self.init_layer_LAM = nn.Sequential(nn.Conv1d(1,point_dim,3,padding=1),nn.LeakyReLU(),nn.Conv1d(point_dim,embdim,3,padding=1))
+        
+        
+        self.layers = ModuleList([ SelfCrossAttention(embdim,out_emb_size,4) for i in range(args.layers)])
+       
+        self.final_layer_PHI = nn.Sequential(nn.Linear(embdim,out_emb_size),nn.LeakyReLU(),nn.Linear(out_emb_size,out_emb_size))
+        self.final_layer_LAM = nn.Sequential(nn.Conv1d(embdim,embdim,3,padding=1),nn.LeakyReLU(),nn.Conv1d(embdim,1,3,padding=1))
+        
+        # number of nodes scaling/bias factor
+#         self.LAM_scale = nn.Sequential(nn.Linear(1,4),nn.LeakyReLU(),nn.Linear(4,1))
+        
+      
+      def forward(self,x,y,m,beta=0,return_evecs = False):
+            
+#             x = xy[:,:-1,:]#EIGENVECTORS            
+#             y = xy[:,-1:,:]#EIGENVALUES
+            y = torch.nn.functional.pad(y,(0,self.out_emb_size-y.shape[-1]))[:,None]
+    
+#             if m is None:
+#                 m = torch.ones_like(xy[:,:,:1])
+            if m is not None:
+                nnodes =  m.sum(-1)[:,None,None]*1e-2
+            
+
+            batch_size = x.shape[0] 
+#             beta = beta.view(x.size(0) , 1, 1)          # (B, 1, 1) #TIME      
+#             time_emb = torch.cat([nnodes, beta, torch.sin(beta), torch.cos(beta)], dim=-2).transpose(1,2)*0+1  # (B, 3, 1)   
+            time_emb = torch.ones(batch_size,1,4, device=x.device)
+            outx,outy = x,y
+            outx = self.init_layer_PHI(outx)
+            
+            outy = self.init_layer_LAM(outy).transpose(-1,-2) #b x d x k
+            
+            for jj, layer in enumerate(self.layers):  
+                outx,outy = layer(outx,outy,m,time_emb)
+
+#             loffset = 0
+#             if m is not None:
+#                 loffset =  self.LAM_scale(m.sum(-1,keepdim=True))[...,None]
+                
+                
+            outx = self.final_layer_PHI(outx)
+            outy = self.final_layer_LAM(outy.transpose(-1,-2))
+            
+            
+#             outfinal = xy+torch.cat([outx,outy],-2) 
+#             outfinal = outfinal# / self.marginal_prob_std(beta)      
+            outx[:,:,:x.shape[-1]] += x
+            outy[:,:,:y.shape[-1]] += y
+
+            outx = outx/outx.norm(dim=-2)[:,None]
+        
+            L = (outx*outy)@outx.transpose(-1,-2)
+            D = 1/(torch.diagonal(L.abs(),dim1=-2, dim2=-1).sqrt()+1e-6)
+            A = 1-D[:,:,None]*L*D[:,None,:]
+
+            if return_evecs:
+                return A, outx, outy[:,0]
+                
+            return A, None, None
+        
+        
+        
+        
         

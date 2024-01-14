@@ -187,6 +187,7 @@ class Refiner(L.LightningModule):
         if self.train_generator:
             genrec_loss = gen_loss + 1e0*rec_loss
         else:
+            gen_loss = torch.tensor(0)
             genrec_loss = rec_loss
             
         genrec_loss.backward()
@@ -212,8 +213,8 @@ class Refiner(L.LightningModule):
         if tot_dis_loss!=tot_dis_loss:
             tot_dis_loss = self.last_tot_dis_loss
 
-        self.train_generator = self.current_epoch>250
-        self.train_dicriminator =  self.current_epoch>=200  and \
+        self.train_generator = self.current_epoch>=50
+        self.train_dicriminator =  self.current_epoch>=40  and \
                                    (tot_gen_loss<=1.5*tot_dis_loss or self.current_epoch%100==0)
         self.last_tot_dis_loss = tot_dis_loss
         
