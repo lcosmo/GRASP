@@ -135,7 +135,7 @@ class Transformer(L.LightningModule):
         #     num_warmup_steps = 500,
         #     num_training_steps = self.hparams.train_loop_batches*self.hparams.max_epochs
         # )
-        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1, 0.05, self.hparams.max_epochs//2)
+        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1, 0.1, self.hparams.max_epochs//2)
         
         return {"optimizer": optimizer,  "lr_scheduler":scheduler}
 
