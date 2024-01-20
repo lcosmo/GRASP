@@ -130,7 +130,7 @@ if __name__ == "__main__":
     early_stop_callback = EarlyStopping(
         monitor='avg_degrad',
         min_delta=0,
-        patience=2000,
+        patience=5000,
         verbose=False,
         mode='min')
 
@@ -149,8 +149,15 @@ if __name__ == "__main__":
         logger=wandb_logger,
         log_every_n_steps=len(dataloader),
         check_val_every_n_epoch = None,
+<<<<<<< HEAD
         val_check_interval = args.val_check_interval,
         max_epochs = args.max_epochs
+=======
+        val_check_interval = args.val_check_interval, 
+        max_epochs = args.max_epochs,
+        auto_scale_batch_size="binsearch",
+        auto_lr_find=True
+>>>>>>> 5063f7cb4b8bf0a3a2f3cff2b8c1b4d03617ba8d
     )
 
     trainer.fit(ref, dataloader, val_dataloader)

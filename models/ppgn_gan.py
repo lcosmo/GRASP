@@ -124,7 +124,7 @@ class PPGNGenerator(nn.Module):
             
 #             L = get_adj(noisy_gen_eigvec[i],noisy_gen_eigval[i])
         L = adj
-        D = 1/L.diagonal(dim1=-2, dim2=-1).sqrt()
+        D = 1/(L.diagonal(dim1=-2, dim2=-1).sqrt() + 1e-6)
         adj = 1-D[:,:,None]*L*D[:,None,:]
 
             

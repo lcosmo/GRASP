@@ -154,6 +154,7 @@ class Refiner(L.LightningModule):
 #             true_loss.backward()            
             true_loss = true_loss.item()
 
+            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), 0.5)
             optimizerD.step()
             
             tot_dis_loss=(fake_loss+true_loss)/2
@@ -191,7 +192,7 @@ class Refiner(L.LightningModule):
             genrec_loss = rec_loss
             
         genrec_loss.backward()
-        
+        torch.nn.utils.clip_grad_norm_(generator.parameters(), 0.5)
         optimizerG.step()
         
         tot_gen_loss=gen_loss.item()

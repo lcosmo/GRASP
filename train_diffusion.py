@@ -41,7 +41,7 @@ def get_arg_parser():
 #     parser.add_argument('--end_lr', type=float, default=1e-5)
 #     parser.add_argument('--sched_start_epoch', type=int, default=100*THOUSAND)
 #     parser.add_argument('--sched_end_epoch', type=int, default=200*THOUSAND)
-    parser.add_argument('--max_epochs', type=int, default=500*THOUSAND)
+    parser.add_argument('--max_epochs', type=int, default=300*THOUSAND)
 
     # Training
     parser.add_argument('--seed', type=int, default=2020)
@@ -55,8 +55,8 @@ def get_arg_parser():
     parser.add_argument('--smallest', type=eval, default=False, choices=[True, False])
     
     parser.add_argument('--scaler', type=str, default="standard") #stadard if not specified (standard or minmax)
-    
-    parser.add_argument('--latent_dim', type=int, default=128)
+
+    parser.add_argument('--latent_dim', type=int, default=256)
     parser.add_argument('--layers', type=int, default=9)
     parser.add_argument('--use_mask', type=eval, default=True, choices=[True, False])
 
@@ -135,7 +135,8 @@ if __name__ == "__main__":
         accelerator="auto",
         logger=wandb_logger,
         log_every_n_steps=250,
-        check_val_every_n_epoch=None
+        check_val_every_n_epoch=None,
+        val_check_interval = args.val_check_interval
     )
 
     trainer.fit(model, train_loader, valid_loader)
