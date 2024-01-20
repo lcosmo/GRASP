@@ -266,7 +266,7 @@ class Refiner(L.LightningModule):
             noise = torch.cat([noise,noisy_gen_node_features],-1)
             fake_adj, fake_node_features, fake_edge_features = self.generator(noise, noisy_gen_eigval, noisy_gen_eigvec, mask)
 
-            score = -self.discriminator( noisy_gen_eigval, noisy_gen_eigvec, mask, fake_adj,node_features=fake_node_features, edge_features=fake_edge_features).cpu()
+#             score = -self.discriminator( noisy_gen_eigval, noisy_gen_eigvec, mask, fake_adj,node_features=fake_node_features, edge_features=fake_edge_features).cpu()
             fake_adj = fake_adj.cpu()
 
         graph_pred_list = []
@@ -278,7 +278,7 @@ class Refiner(L.LightningModule):
                 nx.set_node_attributes(G,{i:j.argmax(-1).item() for i,j in enumerate(fake_node_features[i])},'x')
             graph_pred_list.append(G)
 
-        graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0][:b]
+        graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0][:]
 
 
         try:
