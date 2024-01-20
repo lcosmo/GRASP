@@ -54,7 +54,7 @@ def get_arg_parser():
     parser.add_argument('--k', type=int, default=33)
     parser.add_argument('--smallest', type=eval, default=False, choices=[True, False])
     
-    parser.add_argument('--scaler', type=str, default="minmax") #stadard if not specified
+    parser.add_argument('--scaler', type=str, default="standard") #stadard if not specified (standard or minmax)
     
     parser.add_argument('--latent_dim', type=int, default=128)
     parser.add_argument('--layers', type=int, default=9)
