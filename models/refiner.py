@@ -141,10 +141,16 @@ class Refiner(L.LightningModule):
             fake_loss = fake_loss.item()
 
             true_label = torch.ones((mask_half.shape[0],), device=mask.device)
-            if fake_node_features is not None:
-                true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], fake_adj[:num_gt], node_features=fake_node_features[:num_gt], edge_features=fake_edge_features[:num_gt])
+
+            if self.hparams.disc_ori:
+                true_adj = noisy_adj
             else:
-                true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], fake_adj[:num_gt])
+                true_adj = fake_adj[:num_gt]
+            
+            if fake_node_features is not None:
+                true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], true_adj, node_features=fake_node_features[:num_gt], edge_features=fake_edge_features[:num_gt])
+            else:
+                true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], true_adj)
             true_loss = criterion(true_pred[:,0],true_label)
             true_loss.backward()            
             

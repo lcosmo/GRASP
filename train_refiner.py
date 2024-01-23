@@ -47,6 +47,8 @@ def get_arg_parser():
     # Diffusion generation
     parser.add_argument('--n_graphs_train', type=int, default=256)
     parser.add_argument('--n_graphs_test', type=int, default=64)
+    parser.add_argument('--reproject', type=eval, default=True, choices=[True, False])
+    parser.add_argument('--disc_ori', type=eval, default=False, choices=[True, False])
     
     #optimizaation
     parser.add_argument('--device', type=str, default="cuda")
@@ -103,7 +105,7 @@ if __name__ == "__main__":
     n_graphs = args.n_graphs_train + args.n_graphs_test
     n_nodes = list(graphs_train_set.sample_n_nodes(n_graphs-1)) + [graphs_train_set.n_max]
 
-    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=16, reproject=True)
+    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=16, reproject=args.reproject)
     generations_x = generations_x.cpu()
     generations_y = generations_y.cpu()
 
@@ -149,15 +151,10 @@ if __name__ == "__main__":
         logger=wandb_logger,
         log_every_n_steps=len(dataloader),
         check_val_every_n_epoch = None,
-<<<<<<< HEAD
-        val_check_interval = args.val_check_interval,
-        max_epochs = args.max_epochs
-=======
         val_check_interval = args.val_check_interval, 
         max_epochs = args.max_epochs,
         auto_scale_batch_size="binsearch",
         auto_lr_find=True
->>>>>>> 5063f7cb4b8bf0a3a2f3cff2b8c1b4d03617ba8d
     )
 
     trainer.fit(ref, dataloader, val_dataloader)
