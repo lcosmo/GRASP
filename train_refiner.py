@@ -54,9 +54,9 @@ def get_arg_parser():
     parser.add_argument('--device', type=str, default="cuda")
     parser.add_argument('--batch_size', type=int, default=8)
     
-    parser.add_argument('--max_epochs', type=int, default=50000)
+    parser.add_argument('--max_epochs', type=int, default=150000)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--seed', type=int, default=2020)
+    parser.add_argument('--seed', type=int, default=2024)
     
     
     return parser
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     n_graphs = args.n_graphs_train + args.n_graphs_test
     n_nodes = list(graphs_train_set.sample_n_nodes(n_graphs-1)) + [graphs_train_set.n_max]
 
-    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=16, reproject=args.reproject)
+    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=n_graphs, reproject=args.reproject, sampling_steps=400)
     generations_x = generations_x.cpu()
     generations_y = generations_y.cpu()
 
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     early_stop_callback = EarlyStopping(
         monitor='avg_degrad',
         min_delta=0,
-        patience=5000,
+        patience=20000,
         verbose=False,
         mode='min')
 

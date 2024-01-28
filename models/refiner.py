@@ -17,6 +17,8 @@ from models.ppgn_gan import PPGNGenerator, PPGNDiscriminator
 
 from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, eval_fraction_unique, eval_fraction_unique_non_isomorphic_valid, spectral_stats
 
+import copy
+
 class Refiner(L.LightningModule):
 
     def __init__(self, hparams):
@@ -29,7 +31,7 @@ class Refiner(L.LightningModule):
             args.generator_noise_latent_dim = args.k
             
         #########################
-        self.generator = PPGNGenerator(alpha=0.2, n_max=args.n_max, noise_latent_dim=args.generator_noise_latent_dim, n_layers=args.generator_layers, data_channels=args.generator_data_channels, 
+        self.generator_train = PPGNGenerator(alpha=0.2, n_max=args.n_max, noise_latent_dim=args.generator_noise_latent_dim, n_layers=args.generator_layers, data_channels=args.generator_data_channels, 
                                   gelu=True, k_eigval=args.k, use_fixed_emb=False, normalization='instance',
                                     dropout=0,
                                     skip_connection=True,
@@ -44,6 +46,9 @@ class Refiner(L.LightningModule):
                                         qm9=args.qm9, data_channels_mult=1)
 
 
+        # self.generator = copy.deepcopy(self.generator_train)
+        self.generator = self.generator_train
+        
         self.criterion = nn.BCEWithLogitsLoss()
         
         self.automatic_optimization = False
@@ -60,8 +65,8 @@ class Refiner(L.LightningModule):
 #             lr=self.hparams.lr
 #         )
 
-        optimizerD = torch.optim.AdamW(self.discriminator.parameters(), lr=self.hparams.lr*1e-1)
-        optimizerG = torch.optim.AdamW(self.generator.parameters(), lr=self.hparams.lr)
+        optimizerD = torch.optim.AdamW(self.discriminator.parameters(), lr=self.hparams.lr)
+        optimizerG = torch.optim.AdamW(self.generator_train.parameters(), lr=self.hparams.lr)
         optimizer = [optimizerD,optimizerG]
 
 #         scheduler = get_cosine_schedule_with_warmup(
@@ -74,7 +79,7 @@ class Refiner(L.LightningModule):
 
     
     def training_step(self, batch, batch_idx):
-        generator, discriminator = self.generator, self.discriminator
+        generator, discriminator = self.generator_train, self.discriminator
         criterion = self.criterion
         optimizerD, optimizerG = self.optimizers()
 #         scheduler = self.lr_schedulers()
@@ -94,10 +99,15 @@ class Refiner(L.LightningModule):
         mask_real = (noisy_real_eigvec.abs().sum(-1) > 1e-5)#.to(device)
         mask_half = mask_real[:,:].float()
         
-        noisy_real_eigval = noisy_real_eigval + emask_real*torch.randn_like(noisy_real_eigval)*1e-1 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        noisy_real_eigvec = noisy_real_eigvec + emask_real[:,None,:]*torch.randn_like(noisy_real_eigvec)*3e-2 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<        
+        # noisy_real_eigval = noisy_real_eigval + emask_real*torch.randn_like(noisy_real_eigval)*1e-1 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # noisy_real_eigvec = noisy_real_eigvec + emask_real[:,None,:]*torch.randn_like(noisy_real_eigvec)*3e-2 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<        
+        # noisy_real_eigvec[torch.logical_not(mask_real)] = 0
+        # noisy_real_node_features = noisy_real_node_features + torch.randn_like(noisy_real_node_features)*1e-4 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<        
+        
+        noisy_real_eigval = noisy_real_eigval + emask_real*torch.randn_like(noisy_real_eigval)*1e-2 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        noisy_real_eigvec = noisy_real_eigvec + emask_real[:,None,:]*torch.randn_like(noisy_real_eigvec)*5e-3 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<        
         noisy_real_eigvec[torch.logical_not(mask_real)] = 0
-        noisy_real_node_features = noisy_real_node_features + torch.randn_like(noisy_real_node_features)*1e-4 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<        
+        noisy_real_node_features = noisy_real_node_features + torch.randn_like(noisy_real_node_features)*1e-4 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<     
         
         num_gt = noisy_real_eigval.shape[0]
         noisy_gen_eigval = torch.cat([noisy_real_eigval, gen[1][:,0,:self.hparams.k]],0)#<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -160,7 +170,7 @@ class Refiner(L.LightningModule):
 #             true_loss.backward()            
             true_loss = true_loss.item()
 
-            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), 0.5)
+            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), 5)
             optimizerD.step()
             
             tot_dis_loss=(fake_loss+true_loss)/2
@@ -198,7 +208,7 @@ class Refiner(L.LightningModule):
             genrec_loss = rec_loss
             
         genrec_loss.backward()
-        torch.nn.utils.clip_grad_norm_(generator.parameters(), 0.5)
+        torch.nn.utils.clip_grad_norm_(generator.parameters(), 5)
         optimizerG.step()
         
         tot_gen_loss=gen_loss.item()
@@ -228,6 +238,7 @@ class Refiner(L.LightningModule):
 #         self.log('TOT_gen_loss', tot_gen_loss, on_step=False, on_epoch=True)
 #         self.log('TOT_dis_loss', tot_dis_loss, on_step=False, on_epoch=True)
 #         self.log('TOT_rec_loss', tot_rec_loss, on_step=False, on_epoch=True)
+        
         self.log('discriminating', self.train_dicriminator, on_step=False, on_epoch=True)
         
     def validation_step(self, batch, batch_idx):
@@ -236,7 +247,15 @@ class Refiner(L.LightningModule):
     def validation_epoch_end(self, outputs):
         if self.trainer.train_dataloader is None:
             return
-        
+                
+        if self.generator_train != self.generator:
+            alpha=0.5
+            if self.current_epoch<5000:
+                alpha=0
+            with torch.no_grad():
+                for ema_v, model_v in zip(self.generator.state_dict().values(), self.generator_train.state_dict().values()):
+                    ema_v.copy_( ema_v*alpha + (1-alpha)*model_v)
+                    
         ori_train_set = self.trainer.val_dataloaders[0].dataset.datasets[0]
         gen_test_set = self.trainer.val_dataloaders[0].dataset.datasets[1]
 
