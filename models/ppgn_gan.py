@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from .ppgn import Powerful
-from .model_helper import zero_diag, discretize
+from .model_helper import zero_diag
 
 class PPGNGenerator(nn.Module):
     def __init__(
@@ -173,140 +173,6 @@ class PPGNGenerator(nn.Module):
 
             return adj, None, None
 
-
-class MLPGenerator(nn.Module):
-    def __init__(
-        self,
-        alpha=0.2,
-        n_max=36,
-        noise_latent_dim=100,
-        n_layers=8,
-        data_channels=64,
-        gelu=False,
-        k_eigval=18,
-        discretize_adjacency=False,
-        shared_weights=False,
-        use_fixed_emb=False,
-        skip_connection=False,
-        cat_eigvals=False,
-        cat_mult_eigvals=False,
-        no_extra_n=False,
-        use_eigvecs=False,
-        qm9=False,
-        data_channels_mult=1,
-    ):
-        super(MLPGenerator, self).__init__()
-        
-        data_channels = data_channels * data_channels_mult
-
-        self.n_max = n_max
-        self.latent_dim = noise_latent_dim
-        self.alpha = alpha
-        self.n_layers = n_layers
-        self.k_eigval = k_eigval
-        self.discretize_adjacency = discretize_adjacency
-        self.shared_weights = shared_weights
-        self.use_fixed_emb = use_fixed_emb
-        self.skip_connection = skip_connection
-        self.cat_eigvals = cat_eigvals
-        self.cat_mult_eigvals = cat_mult_eigvals
-        self.no_extra_n = no_extra_n
-        self.use_eigvecs = use_eigvecs
-        self.qm9 = qm9
-
-        self.input_features = 0
-        self.input_features += self.latent_dim  # noise
-        if not self.no_extra_n:
-            self.input_features += 1 # + n
-        
-        if gelu:
-            activation = nn.GELU()
-        else:
-            activation = nn.LeakyReLU(negative_slope=alpha)
-
-        # MOLGAN uses 3-layer MLP of [128, 256, 512] and a linear projection layer to X and A
-        self.mlp = nn.Sequential(
-                nn.Linear(self.input_features, data_channels*2),
-                activation,
-                nn.LayerNorm(data_channels*2),
-                nn.Linear(data_channels*2, data_channels*4),
-                activation,
-                nn.LayerNorm(data_channels*4),
-                nn.Linear(data_channels*4, data_channels*8),
-                activation,
-                nn.LayerNorm(data_channels*8),
-            )
-        if self.qm9:
-            output_features = 4
-            self.lin_X = nn.Linear(data_channels*8, self.n_max*4)
-        else:
-            output_features = 1
-        self.lin_A = nn.Linear(data_channels*8, self.n_max*self.n_max*output_features)            
-
-        for name, m in self.named_modules():
-            if isinstance(m, nn.Linear):
-                if gelu:
-                    nn.init.xavier_uniform_(m.weight.data, gain=1.0)
-                else:
-                    nn.init.kaiming_uniform_(m.weight.data, a=self.alpha)
-                if m.bias is not None:
-                    torch.nn.init.zeros_(m.bias.data)
-            elif isinstance(m, nn.Conv2d):
-                nn.init.xavier_uniform_(m.weight.data, gain=1.0)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias.data)
-
-    def forward(self, node_noise, eigval, eigvec, mask):
-        aaaa #fix mask
-        n = torch.sum(mask, dim=-1, keepdim=True)
-        n = n/self.n_max
-
-        if not self.no_extra_n:
-            x = [node_noise, n[:,0]]
-        else:
-            x = [node_noise]
-
-        x = torch.cat(x, dim=-1)
-        del node_noise
-        
-        x = self.mlp(x)
-        if self.qm9:
-            node_features = self.lin_X(x).view(mask.size(0), self.n_max, 4)
-            node_features = node_features * mask[:,:,0].unsqueeze(-1)
-
-            adj = self.lin_A(x).view(mask.size(0), self.n_max, self.n_max, -1)[:, :mask.size(1), :mask.size(2)]
-            del x
-
-            adj = (adj + adj.transpose(1, 2)) / 2
-            adj = adj.softmax(-1)
-
-            edge_features = adj[:,:,:,1:]
-
-            adj = 1 - adj[:,:,:,0]
-            adj = zero_diag(adj)
-            adj = adj * mask
-
-            if adj.isnan().any():
-                print('adj', adj.isnan().any())
-
-            edge_features = edge_features * (1 - torch.eye(edge_features.size(1), edge_features.size(2), device=edge_features.device).view(1, edge_features.size(1), edge_features.size(2), 1).expand_as(edge_features))
-            edge_features = edge_features * mask.unsqueeze(-1).expand_as(edge_features)
-            return adj, node_features, edge_features
-        else:
-            adj = self.lin_A(x).view(mask.size(0), self.n_max, self.n_max)[:, :mask.size(1), :mask.size(2)]
-            del x
-            adj = (adj + adj.transpose(1, 2)) / 2
-
-            adj = adj.sigmoid()
-
-            adj = zero_diag(adj)
-            adj = adj * mask
-            if adj.isnan().any():
-                print('adj', adj.isnan().any())
-
-            return adj, None, None
-
-
 class PPGNDiscriminator(nn.Module):
     def __init__(
         self,
@@ -388,11 +254,6 @@ class PPGNDiscriminator(nn.Module):
 
         eigval = eigval[:, :self.k_eigval]*0
         eigvec = eigvec[:, :, :self.k_eigval]*0
-
-#         if self.partial_laplacian:
-#             lap = (eigvec * eigval.unsqueeze(1).expand_as(eigvec)) @ eigvec.transpose(-2,-1)
-#             adj = torch.stack([adj, lap], dim=-1)
-#             del lap
 
         x = n
         if not self.no_cond:

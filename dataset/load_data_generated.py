@@ -34,29 +34,6 @@ from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, e
 
 from utils.eval_helper_torch import degree_stats, clustering_stats, spectral_stats
  
- 
-# def minmax_norm(value,maxval, minval):
-#     a = -1
-#     b = 1
-#     if (maxval-minval)==0:
-#         print('AHIII')
-#     normalized_val = ((b-a)*((value-minval)/(maxval-minval)))+a
-#     return normalized_val
-
-# def deminmax_norm(N,maxval, minval):
-#     a = -1
-#     b = 1
-#     V = ((maxval-minval)*((N-a)/(b-a)))+minval
-#     return V
-
-# def standa(value, mu, std):
-#     stad_v = (value-mu)/std
-#     return stad_v
-
-# def destanda(val, mu, std):
-#     n = (val*std)+mu
-#     return n
-    
 
 class LaplacianDatasetNX(Dataset):
      
@@ -76,14 +53,6 @@ class LaplacianDatasetNX(Dataset):
             graph_list = graph_list
             print('Comp dimensions...')
             
-#             indices = []                 
-#             maxdimensions = 1
-#             mindimensions = point_dim
-#             for ids in range(len(graph_list)):     
-#                 nodelist = graph_list[ids].number_of_nodes()   
-#                 indices.append(ids)                
-#                 maxdimensions = max(maxdimensions,(nodelist))
-    
             indices = list(range(len(graph_list)))
             maxdimensions = max(g.number_of_nodes() for g in graph_list)
             print(f"Max # nodes: {maxdimensions}")
