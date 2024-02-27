@@ -41,7 +41,7 @@ def get_arg_parser():
 #     parser.add_argument('--end_lr', type=float, default=1e-5)
 #     parser.add_argument('--sched_start_epoch', type=int, default=100*THOUSAND)
 #     parser.add_argument('--sched_end_epoch', type=int, default=200*THOUSAND)
-    parser.add_argument('--max_epochs', type=int, default=300*THOUSAND)
+    parser.add_argument('--max_epochs', type=int, default=100*THOUSAND)
 
     # Training
     parser.add_argument('--seed', type=int, default=2020)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     
     wandb_logger = WandbLogger(
         name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_l-{args.layers}_d-{args.latent_dim}",
-        project="graph_diffusion_perceptron",
+        project="graph_diffusion_perceptron_2",
         entity="l_cosmo"
     )
 

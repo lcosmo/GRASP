@@ -163,7 +163,7 @@ class LaplacianDatasetNX(Dataset):
                 if not smallest:
                     eigvec = v[:,eigva_ids_sort][:,:point_dim] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
                 else:
-                    eigvec = v[:,eigva_ids_sort][:,-point_dim:] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
+                    eigvec = v[:,eigva_ids_sort][:,-(1+point_dim):-1] # v[:,i] is the eigenvector corresponding to the eigenvalue w[i]
 
                 ################ if the graph is smaller than point_dim, add leading zero evals and evecs #############
                 k = eigvec.shape[-1]
@@ -201,7 +201,11 @@ class LaplacianDatasetNX(Dataset):
         test_len = int(len(self.samples)*0.2)
         train_len = len(self.samples) - test_len
         train_set, test_set = random_split(torch.arange(len(self.samples)), [train_len, test_len], generator=torch.Generator().manual_seed(1234))
-
+        
+        train_train_len = int(train_len*0.8)
+        train_val_len = train_len-train_train_len
+        train_train_set, train_val_set = random_split(train_set, [train_train_len, train_val_len], generator=torch.Generator().manual_seed(1234))
+        
         #rescale data
         train_evecs = torch.stack([self.samples[i][1] for i in train_set],0)
         train_evals = torch.stack([self.samples[i][2] for i in train_set],0)
@@ -276,16 +280,18 @@ class LaplacianDatasetNX(Dataset):
         if split == 'train':
             self.compute_mmd_statistics([self.samples[i] for i in train_set], [self.samples[i] for i in test_set])
             self.samples = [self.samples[i] for i in train_set]
+        elif split == 'train_train':            
+            self.compute_mmd_statistics([self.samples[i] for i in train_train_set], [self.samples[i] for i in test_set])
+            self.samples = [self.samples[i] for i in train_train_set]
+        elif split == 'train_val':
+            self.samples = [self.samples[i] for i in train_val_set]
+        elif split == 'test':
+            self.samples = [self.samples[i] for i in test_set]
         else:
-            if split == 'test':
-                self.samples = [self.samples[i] for i in test_set]
-            else:
-                assert split=='all'
-                
+            assert split=='all'
             
         self.extra_data = False
 
-    
         ########################## prefetch #####################################
         self.prefetched = []
         for idx in range(len(self.samples)):

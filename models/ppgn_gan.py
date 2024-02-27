@@ -25,6 +25,7 @@ class PPGNGenerator(nn.Module):
         init_emb_channels=64,
         qm9=False,
         data_channels_mult=1,
+        normalized=True
     ):
         super(PPGNGenerator, self).__init__()
 
@@ -42,6 +43,7 @@ class PPGNGenerator(nn.Module):
         self.no_extra_n = no_extra_n
         self.no_cond = no_cond
         self.qm9 = qm9
+        self.normalized=normalized
 
         self.input_features = 1 + self.latent_dim  # adjacency + noise
         if not self.no_cond and not self.use_fixed_emb:
@@ -123,9 +125,12 @@ class PPGNGenerator(nn.Module):
 
             
 #             L = get_adj(noisy_gen_eigvec[i],noisy_gen_eigval[i])
-        L = adj
-        D = 1/(L.diagonal(dim1=-2, dim2=-1).sqrt() + 1e-6)
-        adj = 1-D[:,:,None]*L*D[:,None,:]
+        if self.normalized:
+            L = adj
+            D = 1/(L.diagonal(dim1=-2, dim2=-1).sqrt() + 1e-6)
+            adj = 1-D[:,:,None]*L*D[:,None,:]
+        else:
+            adj = -adj
 
             
         if not self.no_cond:

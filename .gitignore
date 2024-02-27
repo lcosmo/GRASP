@@ -51,6 +51,8 @@ coverage.xml
 .pytest_cache/
 cover/
 
+
+
 # Translations
 *.mo
 *.pot
@@ -155,6 +157,12 @@ cython_debug/
 graph_diffusion*/
 wandb/
 lightning_logs/
+*.torch
+*.model
+generati/*
+data/*.eigen
+data/*.pickle
+*.ipynb
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

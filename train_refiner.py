@@ -33,6 +33,7 @@ def get_arg_parser():
     parser = argparse.ArgumentParser()
     
     parser.add_argument('--diffusion_model', type=str, default="", required=True)
+    parser.add_argument('--resume', type=str, default=None, required=False)
 
     # GAN arguments
     parser.add_argument('--generator_layers', type=int, default=8)
@@ -42,19 +43,21 @@ def get_arg_parser():
     parser.add_argument('--discriminator_layers', type=int, default=4)
     parser.add_argument('--discriminator_data_channels', type=int, default=32)
     parser.add_argument('--rec_weight', type=float, default=1e-1)
-    parser.add_argument('--val_check_interval', type=int, default=500)
+    parser.add_argument('--val_check_interval', type=int, default=500)#500
     
     # Diffusion generation
     parser.add_argument('--n_graphs_train', type=int, default=256)
     parser.add_argument('--n_graphs_test', type=int, default=64)
     parser.add_argument('--reproject', type=eval, default=True, choices=[True, False])
     parser.add_argument('--disc_ori', type=eval, default=False, choices=[True, False])
+    parser.add_argument('--normalized', type=eval, default=True, choices=[True, False])
     
     #optimizaation
     parser.add_argument('--device', type=str, default="cuda")
     parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--use_validation', type=eval, default=True, choices=[True, False])
     
-    parser.add_argument('--max_epochs', type=int, default=150000)
+    parser.add_argument('--max_epochs', type=int, default=20000)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=2024)
     
@@ -68,7 +71,7 @@ if __name__ == "__main__":
     
     
     #################### load diffusion_model ##############################
-    diffusion_model_path = glob.glob(f'graph_diffusion_perceptron/{args.diffusion_model}/checkpoints/epoch*.ckpt')[0]
+    diffusion_model_path = glob.glob(f'graph_diffusion_perceptron_2/{args.diffusion_model}/checkpoints/epoch*.ckpt')[0]
     model = Transformer.load_from_checkpoint(diffusion_model_path)
 
     model.hparams.update(args.__dict__)
@@ -77,9 +80,17 @@ if __name__ == "__main__":
     
 
     ################### load real graphs training set ######################
-    graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', nodefeatures=args.dataset[:3] in ["qm9"])
+    
+    if args.use_validation:
+        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_train', nodefeatures=args.dataset[:3] in ["qm9"])
+        graphs_val_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_val', nodefeatures=args.dataset[:3] in ["qm9"])
+    else:
+        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', nodefeatures=args.dataset[:3] in ["qm9"])
+        graphs_val_set = graphs_train_set
+    
     graphs_test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', nodefeatures=args.dataset[:3] in ["qm9"])
 
+    
     graphs_train_set.get_extra_data(False)
 
     graphs_train_set.get_extra_data()
@@ -97,15 +108,14 @@ if __name__ == "__main__":
 
     train_set = torch.utils.data.TensorDataset(real_evec,real_eval,real_adj,real_edge_features)
     train_dataloader = DataLoader(train_set, batch_size=16, shuffle=True, num_workers=0,pin_memory=True)
-    
-    
+        
     ############### generate graphs with diffusion #######################
     model.to(args.device)
 
     n_graphs = args.n_graphs_train + args.n_graphs_test
     n_nodes = list(graphs_train_set.sample_n_nodes(n_graphs-1)) + [graphs_train_set.n_max]
 
-    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=n_graphs, reproject=args.reproject, sampling_steps=400)
+    generations_x,generations_y = model.sample_eigs(max_nodes=n_nodes, num_eigs=args.k+args.feature_size, scale_xy=graphs_train_set.scale_xy, unscale_xy=graphs_train_set.unscale_xy, device=device, num_graphs=n_graphs, reproject=args.reproject, sampling_steps=100)
     generations_x = generations_x.cpu()
     generations_y = generations_y.cpu()
 
@@ -116,11 +126,14 @@ if __name__ == "__main__":
     # torch.save([generations_dataset,generations_dataset_val],"tmp.data")
 
     dataloader = DataLoader(ConcatDataset(train_set,generations_dataset), batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=True)
-    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=True)
+    val_dataloader = DataLoader(ConcatDataset(graphs_train_set,graphs_val_set,generations_dataset_val), batch_size=args.batch_size, shuffle=False, num_workers=0,pin_memory=True)
 
     ###################################
     args.n_max = graphs_train_set.n_max
-    ref = Refiner(args)
+    if args.resume is not None:
+        ref = Refiner.load_from_checkpoint(args.resume, strict=False)
+    else:
+        ref = Refiner(args)
 
     checkpoint_callback = ModelCheckpoint(
         save_last=True,
@@ -132,13 +145,13 @@ if __name__ == "__main__":
     early_stop_callback = EarlyStopping(
         monitor='avg_degrad',
         min_delta=0,
-        patience=20000,
+        patience=2000,
         verbose=False,
         mode='min')
 
     wandb_logger = WandbLogger(
         name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_dm-{args.diffusion_model}",
-        project="graph_diffusion_refinement",
+        project="graph_diffusion_refinement_2",
         entity="l_cosmo",
         offline=False
     )
