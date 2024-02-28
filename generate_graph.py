@@ -14,11 +14,20 @@ from models.predictor import Predictor
 from models.diffusion import SpectralDiffusion
 from dataset.load_data_generated import LaplacianDatasetNX
 
-diffusion_model_checkpoint = 'graph_diffusion_perceptron_2/2wtswzun/checkpoints/epoch=17999-step=18000.ckpt'
-predictor_model_checkpoint = 'graph_diffusion_refinement_2/ie5buosk/checkpoints/epoch=10437-step=111324.ckpt'
+from utils.visualization import NonMolecularVisualization
+
+diffusion_model_checkpoint = 'data/model_parameters/diffusion_sbm_200.ckpt'
+predictor_model_checkpoint = 'data/model_parameters/predictor_sbm_200.ckpt'
+
+diffusion_model_checkpoint = 'data/model_parameters/diffusion_planar_64_200.ckpt'
+predictor_model_checkpoint = 'data/model_parameters/predictor_planar_64_200.ckpt'
+
+diffusion_model_checkpoint = 'data/model_parameters/diffusion_proteins.ckpt'
+predictor_model_checkpoint = 'data/model_parameters/predictor_proteins.ckpt'
+
 device = 'cuda'
-n_graphs = 100
-sampling_steps = 100
+n_graphs = 10
+sampling_steps = 200
 
 model_predictor = Predictor.load_from_checkpoint(predictor_model_checkpoint, strict=False).generator
 model_diffusion = SpectralDiffusion.load_from_checkpoint(diffusion_model_checkpoint, strict=False)
@@ -60,8 +69,7 @@ with torch.no_grad():
         graph_pred_list.append(G)
         
 end = time.time()
-print(f"Generated {n_graphs} in {time.time()-start} seconds")
+print(f"Generated {n_graphs} graphs in {time.time()-start} seconds")
 
 #saving graphs here
-
-
+NonMolecularVisualization().visualize(f'results/{datasetname}/',graph_pred_list,10)

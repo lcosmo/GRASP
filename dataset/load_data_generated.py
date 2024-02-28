@@ -41,10 +41,8 @@ class LaplacianDatasetNX(Dataset):
         
         self.point_dim = point_dim
         self.samples = []
-        print('Point dim {}'.format(self.point_dim))
+        # print('Point dim {}'.format(self.point_dim))
         self.label = []
-#         folder = '/home/lcosmo/GIORGIA/'
-
         filename = f"{ds_filename}_{point_dim}_sm{smallest}_sc{scaler}_v08.torch"
         if not os.path.isfile(filename):
             with open( ds_filename+'.pkl', "rb") as f:
@@ -163,7 +161,7 @@ class LaplacianDatasetNX(Dataset):
         else:
             self.samples,self.edge_features,self.node_features = torch.load(filename)
             
-        print('Tot #{}'.format(len(self.samples))  )
+        # print('Tot #{}'.format(len(self.samples))  )
  
             
         #train test
@@ -300,7 +298,7 @@ class LaplacianDatasetNX(Dataset):
         
     def compute_mmd_statistics(self,train_set,test_set):
         
-        print("compute graphs statistics")
+        # print("compute graphs statistics")
         compute_emd=False
 #         if len(train_set)>500:
 #             compute_emd=True
@@ -343,11 +341,11 @@ class LaplacianDatasetNX(Dataset):
 
         ########################### dataset stats #####################
         self.degree = degree_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
-        print("computing degree: ",self.degree)        
+        # print("computing degree: ",self.degree)        
         self.cluster = clustering_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
-        print("computing cluster: ",self.cluster)
+        # print("computing cluster: ",self.cluster)
         self.spectral = spectral_stats(adj_list_test, adj_list_train, compute_emd=compute_emd)
-        print("computing spectral: ",self.spectral)
+        # print("computing spectral: ",self.spectral)
 
 
     def __len__(self):
