@@ -6,6 +6,8 @@ import math
 import torch
 import scipy
 import networkx as nx
+import gdown
+import tarfile 
 
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from tqdm.auto import tqdm
@@ -16,14 +18,18 @@ from dataset.load_data_generated import LaplacianDatasetNX
 
 from utils.visualization import NonMolecularVisualization
 
-diffusion_model_checkpoint = 'data/model_parameters/diffusion_sbm_200.ckpt'
-predictor_model_checkpoint = 'data/model_parameters/predictor_sbm_200.ckpt'
+if not os.path.isdir("./data/model_weights/"):
+    gdown.download(id="19mC9gQCpoecBGWaL3__v69Ixu0Rny22r", output="data/model_weights.tar.gz")
+    tarfile.open('./data/model_weights.tar.gz') .extractall('./data/') 
+    
+diffusion_model_checkpoint = 'data/model_weights/diffusion_sbm_200.ckpt'
+predictor_model_checkpoint = 'data/model_weights/predictor_sbm_200.ckpt'
 
-diffusion_model_checkpoint = 'data/model_parameters/diffusion_planar_64_200.ckpt'
-predictor_model_checkpoint = 'data/model_parameters/predictor_planar_64_200.ckpt'
+diffusion_model_checkpoint = 'data/model_weights/diffusion_planar_64_200.ckpt'
+predictor_model_checkpoint = 'data/model_weights/predictor_planar_64_200.ckpt'
 
-diffusion_model_checkpoint = 'data/model_parameters/diffusion_proteins.ckpt'
-predictor_model_checkpoint = 'data/model_parameters/predictor_proteins.ckpt'
+# diffusion_model_checkpoint = 'data/model_weights/diffusion_proteins.ckpt'
+# predictor_model_checkpoint = 'data/model_weights/predictor_proteins.ckpt'
 
 device = 'cuda'
 n_graphs = 10
