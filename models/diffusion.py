@@ -194,17 +194,19 @@ class SpectralDiffusion(L.LightningModule):
             x,m,em = self.sample(max_nodes*oversample_mult, num_graphs*oversample_mult, 1, num_eigs, scale_xy, unscale_xy, device=device, sampling_steps=sampling_steps, reproject=reproject)
             
             samples_EIGVEC = x.detach()#.cpu()        
-            xx = samples_EIGVEC[:,:-1,:self.hparams.k]
-            yy = samples_EIGVEC[:,-1:,:self.hparams.k]
-            
+            xx = samples_EIGVEC[:,:-1,:]
+            yy = samples_EIGVEC[:,-1:,:]
             xx,yy = unscale_xy(xx,yy)
             
             xx = xx*m[:,:-1,:]*em[:,None,:]
             yy = yy.float()*em[:,None,:]
             
-            #keep best generations
-            score = (xx.transpose(-1,-2)@xx - em[:,None,:]*torch.eye(xx.shape[-1],device=xx.device)[None].repeat(xx.shape[0],1,1)*em[:,:,None] ).pow(2).sum((-1,-2))/(em.sum(-1)**2)
+            xx_ = xx[:,:,:self.hparams.k]
+            # yy = yy[:,:,:self.hparams.k]
             
+            #keep best generations
+            score = (xx_.transpose(-1,-2)@xx_ - em[:,None,:self.hparams.k]*torch.eye(xx_.shape[-1],device=xx.device)[None].repeat(xx_.shape[0],1,1)*em[:,:self.hparams.k,None] ).pow(2).sum((-1,-2))/(em[:,:self.hparams.k].sum(-1)**2)
+                        
             score_idx = score.argsort()
             xx = xx[score_idx[:len(score_idx)//oversample_mult]]
             yy = yy[score_idx[:len(score_idx)//oversample_mult]]
