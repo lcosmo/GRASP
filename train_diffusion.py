@@ -88,8 +88,7 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_logger = WandbLogger(
             name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_l-{args.layers}_d-{args.latent_dim}",
-            project="graph_diffusion_perceptron_2",
-            entity="l_cosmo"
+            project="spectral_diffusion",
         )
     else:
         wandb_logger = None

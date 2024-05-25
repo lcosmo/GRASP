@@ -159,11 +159,11 @@ if __name__ == "__main__":
         save_last=True,
         save_top_k=1,
         verbose=True,
-        monitor='avg_degrad',
+        monitor='degree',
         mode='min'
     )
     early_stop_callback = EarlyStopping(
-        monitor='avg_degrad',
+        monitor='degree',
         min_delta=0,
         patience=2000,
         verbose=False,
@@ -172,19 +172,13 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_logger = WandbLogger(
             name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_dm-{args.diffusion_model}",
-            project="graph_diffusion_refinement_4",
-            entity="l_cosmo",
+            project="predictor",
             offline=False
         )
     else:
         wandb_logger = None
     
-    args.check_val_every_n_epoch = None
-    
-    #     pl.Trainer(resume_from_checkpoint = args.resume,
-    #                 max_epochs = args.max_epochs*2,
-    #                callbacks=[checkpoint_callback, early_stop_callback])
-    # else:                       
+    args.check_val_every_n_epoch = None                   
     trainer = pl.Trainer(
         accelerator="auto",
         callbacks=[checkpoint_callback, early_stop_callback],
