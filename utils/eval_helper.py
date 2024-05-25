@@ -392,7 +392,7 @@ def edge_list_reindexed(G):
 
 
 def orca(graph):
-    tmp_fname = f'util/orca/tmp_{"".join(secrets.choice(ascii_uppercase + digits) for i in range(8))}.txt'
+    tmp_fname = f'utils/orca/tmp_{"".join(secrets.choice(ascii_uppercase + digits) for i in range(8))}.txt'
     # print(tmp_fname, flush=True)
     f = open(tmp_fname, 'w')
     f.write(
@@ -402,7 +402,7 @@ def orca(graph):
     f.close()
 
     output = sp.check_output(
-            ['./util/orca/orca', 'node', '4', tmp_fname, 'std'])
+            ['./utils/orca/orca', 'node', '4', tmp_fname, 'std'])
     output = output.decode('utf8').strip()
     idx = output.find(COUNT_START_STR) + len(COUNT_START_STR) + 2
     output = output[idx:]

@@ -26,11 +26,22 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# temp dir
+data/
+experiments/
+utils/orca/*.txt
+SPECTRE/
+torch-points*
+*.pdf
+*.pt
+*.pkl
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+*.npz
 
 # Installer logs
 pip-log.txt

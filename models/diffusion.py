@@ -161,19 +161,19 @@ class SpectralDiffusion(L.LightningModule):
         self.log('loss', loss.item(), on_step=False, on_epoch=True)
         self.log('lr', self.optimizers().param_groups[0]['lr'], on_step=False, on_epoch=True)
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         scheduler = self.lr_schedulers()
         scheduler.step()
         
     def validation_step(self, batch, batch_idx):
         pass
     
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         if self.trainer.train_dataloader is None:
             return
         
-        train_set = self.trainer.train_dataloader.dataset.datasets
-        test_set = self.trainer.val_dataloaders[0].dataset
+        train_set = self.trainer.train_dataloader.dataset
+        test_set = self.trainer.val_dataloaders.dataset
 
         degree, cluster, orbit, unique, novel, spectral = self.evaluate(train_set, test_set, device=self.diffusion.init_layer_PHI[0].bias.device)
         
@@ -222,7 +222,7 @@ class SpectralDiffusion(L.LightningModule):
         # Sample eigenvectors and eigenvalues
         gen_pcs = []
         with torch.no_grad():
-            x,m,em = self.sample(max_nodes, num_graphs*oversample_mult, 1, num_eigs, scale_xy, unscale_xy, device=device)
+            x,m,em = self.sample(max_nodes, num_graphs, 1, num_eigs, scale_xy, unscale_xy, device=device)
             samples_EIGVEC = x.detach().cpu()
 
             

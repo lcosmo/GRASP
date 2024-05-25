@@ -37,7 +37,7 @@ from utils.eval_helper_torch import degree_stats, clustering_stats, spectral_sta
 
 class LaplacianDatasetNX(Dataset):
      
-    def __init__(self,_folder,ds_filename,point_dim=7, smallest=True, split='all', scaler="standard", nodefeatures=False, device="cpu"):
+    def __init__(self,dataset,ds_filename,point_dim=7, smallest=True, split='all', scaler="standard", nodefeatures=False, device="cpu"):
         
         self.point_dim = point_dim
         self.samples = []
@@ -45,6 +45,7 @@ class LaplacianDatasetNX(Dataset):
         self.label = []
         filename = f"{ds_filename}_{point_dim}_sm{smallest}_sc{scaler}_v08.torch"
         if not os.path.isfile(filename):
+            print(ds_filename)
             with open( ds_filename+'.pkl', "rb") as f:
                  graph_list = pickle.load(f)
             
@@ -172,7 +173,19 @@ class LaplacianDatasetNX(Dataset):
         train_train_len = int(train_len*0.8)
         train_val_len = train_len-train_train_len
         train_train_set, train_val_set = random_split(train_set, [train_train_len, train_val_len], generator=torch.Generator().manual_seed(1234))
-        
+
+        if dataset=="zinc":
+            print("ZINC STANDARD SPLITS")
+            test_len = 5000
+            train_len = 220011 + 24445
+            train_set = torch.arange(train_len)
+            test_set = torch.arange(test_len) + train_len
+            
+            train_train_len = 220011
+            train_val_len = 24445
+            train_train_set = torch.arange(train_train_len)
+            train_val_set = torch.arange(train_val_len) + train_train_len
+            
         #rescale data
         train_evecs = torch.stack([self.samples[i][1] for i in train_set],0)
         train_evals = torch.stack([self.samples[i][2] for i in train_set],0)
@@ -197,10 +210,24 @@ class LaplacianDatasetNX(Dataset):
                 y = (y-lm_)/ls_
                 return x,y
 
-            def unscale_xy(self,x,y):
+            def unscale_xy(self,x,y, masked=True):
+                # print(f"IN: {x.shape} {y.shape}") 
+                if masked:
+                    mask  = x.abs().sum(-1)[...,None]>1e-8
+                    emask = y.abs() > 1e-8
+                
                 wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
                 x = x*ws_ + wm_
                 y = y*ls_ + lm_
+
+                # print(x.shape)
+                # print(mask.shape)
+                # print(emask.shape)
+                if masked:
+                    x  = mask  * x #* emask.squeeze(-2).unsqueeze(-2)
+                    # y = emask * y                
+                # print(f"OUT: {x.shape} {y.shape}")
+                
                 return x,y
             
             self.scale_xy = MethodType(scale_xy,self)
@@ -214,18 +241,27 @@ class LaplacianDatasetNX(Dataset):
 
         elif scaler=='minmax':
             
-            def scale_xy(self,x,y):
+            def scale_xy(self, x, y):
                 wm_,wr_,lm_,lr_ = [t.to(x.device) for t in [self.wm,self.wr,self.lm,self.lr]]
                 x = (x-wm_)/wr_*2-1
                 y = (y-lm_)/lr_*2-1
                 return x,y
 
             
-            def unscale_xy(self,x,y):
+            def unscale_xy(self, x, y, mask=True):
+                if masked:
+                    mask  = x.abs().sum(-1)[...,None]>1e-8
+                    emask = y.abs() > 1e-8
+
                 wm_,wr_,lm_,lr_ = [t.to(x.device) for t in [self.wm,self.wr,self.lm,self.lr]]
                 x = wr_*(x+1)/2 + wm_
                 y = lr_*(y+1)/2 + lm_
-                return x,y
+
+                if masked:
+                    x  = mask  * x * emask.squeeze(-2).unsqueeze(-2)
+                    y = emask * y   
+
+                return x, y
             
 #             setattr(LaplacianDatasetNX, 'scale_xy',scale_xy)
 #             setattr(LaplacianDatasetNX, 'unscale_xy',unscale_xy)
@@ -291,10 +327,6 @@ class LaplacianDatasetNX(Dataset):
             # if self.extra_data:
             #     return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
             # return eigevc_tensor, eigva_tensor, node_mask, evec_mask
-
-
-
-    
         
     def compute_mmd_statistics(self,train_set,test_set):
         
@@ -337,8 +369,6 @@ class LaplacianDatasetNX(Dataset):
         adj_list_train = [a[m,:][:,m] for a,m in zip(adj_list_train,[z.sum(-1)>0 for z in adj_list_train])] #remove isolated
         adj_list_test = [a[m,:][:,m] for a,m in zip(adj_list_test,[z.sum(-1)>0 for z in adj_list_test])] #remove isolated
 
-
-
         ########################### dataset stats #####################
         self.degree = degree_stats( adj_list_test, adj_list_train, compute_emd=compute_emd)
         # print("computing degree: ",self.degree)        
@@ -350,19 +380,6 @@ class LaplacianDatasetNX(Dataset):
 
     def __len__(self):
         return len(self.samples)
-
-    
-#     def scale_xy(self,x,y):
-#         wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
-#         x = (x-wm_)/ws_
-#         y = (y-lm_)/ls_
-#         return x,y
-
-#     def unscale_xy(self,x,y):
-#         wm_,ws_,lm_,ls_ = [t.to(x.device) for t in [self.wm,self.ws,self.lm,self.ls]]
-#         x = x*ws_ + wm_
-#         y = y*ls_ + lm_
-#         return x,y
     
     def sample_n_nodes(self, n):
         return np.random.choice(self.n_max+1, n, p=self.n_dist)
@@ -375,42 +392,7 @@ class LaplacianDatasetNX(Dataset):
             return self.prefetched[idx]
         else:
             return self.prefetched[idx][:4]
-        # # class_id, eigevc_tensor, eigva_tensor, lap_tensor,edge_labels,n_nodes,A = self.samples[idx] 
-        
-        # # eigevc_tensor,eigva_tensor = self.scale_xy(eigevc_tensor,eigva_tensor)
-
-        
-        # # node_mask = torch.zeros(eigevc_tensor.shape[0])
-        # # node_mask[:n_nodes] = 1
-        # # eigevc_tensor[n_nodes:,:] = 0
-        
-        # # evec_mask = torch.ones(eigevc_tensor.shape[-1])
-       
-        
-        # # if n_nodes<self.point_dim:
-        # #     zero_pad = self.point_dim-n_nodes
-        # #     eigevc_tensor[:,:zero_pad]=0
-        # #     eigva_tensor[:zero_pad]=0
-        # #     evec_mask[:zero_pad]=0
-
-        # # E = torch.tensor(0)
-        # # if edge_labels is not None:
-        # #     E = torch.zeros(node_mask.shape[0],node_mask.shape[0],self.edge_features) 
-        # #     for (i,j),v in edge_labels:
-        # #         E[i,j,v]=1
-        # #         E[j,i,v]=1
-            
-        # if self.extra_data:
-        #     return eigevc_tensor, eigva_tensor, node_mask, evec_mask, E, class_id[None,:],lap_tensor,n_nodes,A[None,:]
-        
-        # return eigevc_tensor, eigva_tensor, node_mask, evec_mask
-    
-# import sys, inspect
-# def print_classes():
-#     for name, obj in inspect.getmembers(sys.modules[__name__]):
-#         if inspect.isclass(obj):
-#             print(obj)
-# print_classes()
+ 
 def n_community(num_communities, max_nodes, p_inter=0.05):
     assert num_communities > 1
     
