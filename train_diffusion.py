@@ -56,8 +56,8 @@ if __name__ == "__main__":
     seed_all(args.seed)    
 
     #load training and validation data
-    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_train', scaler=args.scaler, nodefeatures=args.dataset in ["qm9","zinc"], device="cpu")
-    valid_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_val', scaler=args.scaler, nodefeatures=args.dataset in ["qm9","zinc"])
+    train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_train', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"], device="cpu")
+    valid_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_val', scaler=args.scaler, nodefeatures=args.dataset in ["qm9"])
     
     train_set.get_extra_data(False)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0,pin_memory=False)
@@ -88,7 +88,8 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_logger = WandbLogger(
             name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_l-{args.layers}_d-{args.latent_dim}",
-            project="spectral_diffusion",
+            project="graph_diffusion_perceptron_2",
+            entity="l_cosmo"
         )
     else:
         wandb_logger = None

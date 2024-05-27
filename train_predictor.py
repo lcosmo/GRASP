@@ -67,7 +67,7 @@ def get_arg_parser():
     parser.add_argument('--max_epochs', type=int, default=500000)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=2020)
-    parser.add_argument('--val_check_interval', type=int, default=5000)#500
+    parser.add_argument('--val_check_interval', type=int, default=100)#500
     parser.add_argument('--wandb', type=eval, default=True, choices=[True, False])    
     
     return parser
@@ -82,17 +82,17 @@ if __name__ == "__main__":
 
     model.hparams.update(args.__dict__)
     args = model.hparams
-    args.qm9 = args.dataset[:3] in ["qm9","zin"]
+    args.qm9 = args.dataset[:3] in ["qm9"]
 
     ################### load real graphs training set ######################    
     if args.use_validation:
-        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_train', nodefeatures=args.dataset[:3] in ["qm9","zin"])
-        graphs_val_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_val', nodefeatures=args.dataset[:3] in ["qm9","zin"])
+        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_train', nodefeatures=args.dataset[:3] in ["qm9"])
+        graphs_val_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train_val', nodefeatures=args.dataset[:3] in ["qm9"])
     else:
-        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', nodefeatures=args.dataset[:3] in ["qm9","zin"])
+        graphs_train_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='train', nodefeatures=args.dataset[:3] in ["qm9"])
         graphs_val_set = graphs_train_set
     
-    graphs_test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', nodefeatures=args.dataset[:3] in ["qm9","zin"])
+    graphs_test_set = LaplacianDatasetNX(args.dataset,'data/'+args.dataset,point_dim=args.k, smallest=args.smallest, split='test', nodefeatures=args.dataset[:3] in ["qm9"])
     
     graphs_train_set.get_extra_data()
     real_eval = torch.stack([t[1] for t in graphs_train_set],0)
@@ -159,11 +159,11 @@ if __name__ == "__main__":
         save_last=True,
         save_top_k=1,
         verbose=True,
-        monitor='degree',
+        monitor='avg_degrad',
         mode='min'
     )
     early_stop_callback = EarlyStopping(
-        monitor='degree',
+        monitor='avg_degrad',
         min_delta=0,
         patience=2000,
         verbose=False,
@@ -172,7 +172,8 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_logger = WandbLogger(
             name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_dm-{args.diffusion_model}",
-            project="predictor",
+            project="graph_diffusion_refinement_4",
+            entity="l_cosmo",
             offline=False
         )
     else:
