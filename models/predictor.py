@@ -13,7 +13,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
-from models.ema import ExponentialMovingAverage
+# from models.ema import ExponentialMovingAverage
 from models.ppgn_gan import PPGNGenerator, PPGNDiscriminator
 from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, eval_fraction_unique, eval_fraction_unique_non_isomorphic_valid, spectral_stats
 
@@ -77,7 +77,7 @@ class Predictor(L.LightningModule):
         self.last_tot_dis_loss = 0
         self.training_step_outputs = []
         
-        self.ema = ExponentialMovingAverage(self.generator.parameters(), decay=0.99)
+        # self.ema = ExponentialMovingAverage(self.generator.parameters(), decay=0.99)
         
         if self.hparams.dataset=='qm9':
             self.molecular_metrics = None
@@ -232,7 +232,7 @@ class Predictor(L.LightningModule):
     
     def on_train_epoch_end(self):
         #ema
-        self.ema.update(self.generator.parameters())
+        # self.ema.update(self.generator.parameters())
 
         outputs = self.training_step_outputs
         tot_gen_loss = sum([o['tot_gen_loss'] for o in outputs])
@@ -257,8 +257,8 @@ class Predictor(L.LightningModule):
             return
 
         ###ema###
-        self.ema.store(self.generator.parameters())
-        self.ema.copy_to(self.generator.parameters())
+        # self.ema.store(self.generator.parameters())
+        # self.ema.copy_to(self.generator.parameters())
                     
         ori_train_set = self.trainer.val_dataloaders.dataset.datasets[0]
         ori_val_set = self.trainer.val_dataloaders.dataset.datasets[1]
@@ -286,7 +286,7 @@ class Predictor(L.LightningModule):
             self.log('avg_degrad',  torch.tensor(avg_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
         
         ###ema###
-        self.ema.restore(self.generator.parameters())
+        # self.ema.restore(self.generator.parameters())
         
     def evaluate(self, train_set, val_set, test_set, device='cuda'):
         train_set.get_extra_data(True)
