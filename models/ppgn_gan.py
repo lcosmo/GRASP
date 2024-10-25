@@ -141,19 +141,22 @@ class PPGNGenerator(nn.Module):
 
             node_features = node_features.softmax(-1) * mask[:,:,None]
             adj = (adj + adj.transpose(1, 2)) / 2
+            
             adj = adj.softmax(-1)
-
             edge_features = adj[:,:,:,1:]
-
             adj = 1 - adj[:,:,:,0]
+
+            # adj = adj.sigmoid()            
+            # edge_features = adj[:,:,:,1:]
+            # adj = adj[:,:,:,0]
+            
             adj = zero_diag(adj)
             adj = mask[:,None,:] * adj * mask[:,:,None]
 
             if adj.isnan().any():
                 print('adj', adj.isnan().any())
 
-            edge_features = edge_features * (1 - torch.eye(edge_features.size(1), edge_features.size(2), device=edge_features.device).view(1, edge_features.size(1), edge_features.size(2), 1).expand_as(edge_features))
-            
+            edge_features = edge_features * (1 - torch.eye(edge_features.size(1), edge_features.size(2), device=edge_features.device)[None,...,None].expand_as(edge_features))            
             edge_features = mask[:,None,:,None] * edge_features * mask[:,:,None,None]
 
             return adj, node_features, edge_features
@@ -272,7 +275,6 @@ class PPGNDiscriminator(nn.Module):
             adj = torch.cat([adj.unsqueeze(-1), edge_features], dim=-1)
 
         x = self.powerful(adj, x, mask)
-        del adj
 
         if x.isnan().any():
             print('x_last', x)

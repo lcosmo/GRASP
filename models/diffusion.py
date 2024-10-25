@@ -207,14 +207,16 @@ class SpectralDiffusion(L.LightningModule):
             #keep best generations
             score = (xx_.transpose(-1,-2)@xx_ - em[:,None,:self.hparams.k]*torch.eye(xx_.shape[-1],device=xx.device)[None].repeat(xx_.shape[0],1,1)*em[:,:self.hparams.k,None] ).pow(2).sum((-1,-2))/(em[:,:self.hparams.k].sum(-1)**2)
                         
-            score_idx = score.argsort()
-            xx = xx[score_idx[:len(score_idx)//oversample_mult]]
-            yy = yy[score_idx[:len(score_idx)//oversample_mult]]
-
-            shuffle = torch.randperm(xx.shape[0])
-            xx = xx[shuffle]
-            yy = yy[shuffle]
-
+            # score_idx = score.argsort()
+            # xx = xx[score_idx[:len(score_idx)//oversample_mult]]
+            # yy = yy[score_idx[:len(score_idx)//oversample_mult]]
+            score_idx = score.reshape(oversample_mult,-1).argmin(0).cpu()*len(max_nodes)+torch.arange(len(max_nodes))
+            xx = xx[score_idx]
+            yy = yy[score_idx]
+            
+            # shuffle = torch.randperm(xx.shape[0])
+            # xx = xx[shuffle]
+            # yy = yy[shuffle]
         return xx,yy
     
     
