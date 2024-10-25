@@ -13,8 +13,12 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
+from models.ema import ExponentialMovingAverage
 from models.ppgn_gan import PPGNGenerator, PPGNDiscriminator
 from utils.eval_helper import degree_stats, clustering_stats, orbit_stats_all, eval_fraction_unique, eval_fraction_unique_non_isomorphic_valid, spectral_stats
+
+from utils .molecular_eval import BasicMolecularMetrics
+from rdkit import Chem
 
 from utils.misc import create_vis
 import copy
@@ -72,6 +76,11 @@ class Predictor(L.LightningModule):
         
         self.last_tot_dis_loss = 0
         self.training_step_outputs = []
+        
+        self.ema = ExponentialMovingAverage(self.generator.parameters(), decay=0.99)
+        
+        if self.hparams.dataset=='qm9':
+            self.molecular_metrics = None
         
     
     def configure_optimizers(self):
@@ -154,6 +163,7 @@ class Predictor(L.LightningModule):
             
             if fake_node_features is not None:
                 true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], true_adj, node_features=fake_node_features[:num_gt], edge_features=fake_edge_features[:num_gt])
+                # true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], true_adj, node_features=noisy_real_node_features[:num_gt], edge_features=real_edge_features[:num_gt])
             else:
                 true_pred = discriminator(noisy_gen_eigval[:num_gt], noisy_gen_eigvec[:num_gt], mask[:num_gt], true_adj)
             true_loss = criterion(true_pred[:,0],true_label)
@@ -188,13 +198,16 @@ class Predictor(L.LightningModule):
 
         avg_denisty = noisy_adj.mean([-1,-2],keepdims=True)
         weight = noisy_adj*(1-avg_denisty) + avg_denisty*(1-noisy_adj)
-        rec_loss = torch.nn.functional.binary_cross_entropy(fake_adj[:num_gt],noisy_adj)#,weight=weight)
+        
         
         if fake_node_features is not None:
-            rec_loss = rec_loss + (torch.nn.functional.binary_cross_entropy(fake_node_features[:num_gt].softmax(-1), batch[0][:,:,self.hparams.k:],reduction="none")*mask_real[...,None]).sum()/mask_real.sum()
-            rec_loss = rec_loss + (torch.nn.functional.binary_cross_entropy(fake_edge_features[:num_gt].softmax(-1), real_edge_features,reduction="none")*noisy_adj[...,None]).sum()/noisy_adj.sum()
-
-
+            rec_loss = (torch.nn.functional.cross_entropy(fake_node_features[:num_gt].permute([0,2,1]), noisy_real_node_features.argmax(-1),reduction="none")*mask_real).sum()/mask_real.sum()
+            rec_loss = rec_loss + torch.nn.functional.cross_entropy(\
+                torch.cat([(1-fake_adj[...,None]),fake_edge_features],-1)[:num_gt].permute([0,3,1,2]),\
+                torch.cat([(1-noisy_adj[...,None]),real_edge_features],-1).argmax(-1))
+        else:
+            rec_loss = torch.nn.functional.binary_cross_entropy(fake_adj[:num_gt],noisy_adj)#,weight=weight)            
+        
         if self.train_generator:
             genrec_loss = gen_loss + self.hparams.rec_weight*rec_loss
         else:
@@ -215,8 +228,12 @@ class Predictor(L.LightningModule):
 #         self.log('lr', self.optimizers()[0].param_groups[0]['lr'], on_step=False, on_epoch=True)
         return self.training_step_outputs[-1]
 
-        
+
+    
     def on_train_epoch_end(self):
+        #ema
+        self.ema.update(self.generator.parameters())
+
         outputs = self.training_step_outputs
         tot_gen_loss = sum([o['tot_gen_loss'] for o in outputs])
         tot_dis_loss = sum([o['tot_dis_loss'] for o in outputs])
@@ -238,32 +255,38 @@ class Predictor(L.LightningModule):
     def on_validation_epoch_end(self):
         if self.trainer.train_dataloader is None:
             return
-                
-        # if self.generator_train != self.generator:
-        #     alpha=0.5
-        #     if self.current_epoch<5000:
-        #         alpha=0
-        #     with torch.no_grad():
-        #         for ema_v, model_v in zip(self.generator.state_dict().values(), self.generator_train.state_dict().values()):
-        #             ema_v.copy_( ema_v*alpha + (1-alpha)*model_v)
+
+        ###ema###
+        self.ema.store(self.generator.parameters())
+        self.ema.copy_to(self.generator.parameters())
                     
         ori_train_set = self.trainer.val_dataloaders.dataset.datasets[0]
         ori_val_set = self.trainer.val_dataloaders.dataset.datasets[1]
         gen_test_set = self.trainer.val_dataloaders.dataset.datasets[2]
 
-        degree, cluster,  unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad = self.evaluate(ori_train_set, ori_val_set, gen_test_set, device=self.generator.powerful.in_lin[0].bias.device)
+        if self.hparams.dataset=='qm9':
+            valid,unique,novel = self.evaluate(ori_train_set, ori_val_set, gen_test_set, device=self.generator.powerful.in_lin[0].bias.device)
+            self.log('unique',  torch.tensor(unique).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('novel',  torch.tensor(novel).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('valid',  torch.tensor(valid).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('avg_degrad',  torch.tensor(1-valid*unique*novel).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+        else:
+            degree, cluster,  unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad = self.evaluate(ori_train_set, ori_val_set, gen_test_set, device=self.generator.powerful.in_lin[0].bias.device)
+            
+            self.log('degree', torch.tensor(degree).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('cluster',  torch.tensor(cluster).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            # self.log('orbit',  torch.tensor(orbit).float(), on_step=False, on_epoch=True)
+            self.log('unique',  torch.tensor(unique).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('novel',  torch.tensor(novel).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('spectral',  torch.tensor(spectral).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+    
+            self.log('degree_degrad', torch.tensor(degree_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('cluster_degrad',  torch.tensor(cluster_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('spectral_degrad',  torch.tensor(spectral_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log('avg_degrad',  torch.tensor(avg_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
         
-        self.log('degree', torch.tensor(degree).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('cluster',  torch.tensor(cluster).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        # self.log('orbit',  torch.tensor(orbit).float(), on_step=False, on_epoch=True)
-        self.log('unique',  torch.tensor(unique).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('novel',  torch.tensor(novel).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('spectral',  torch.tensor(spectral).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-
-        self.log('degree_degrad', torch.tensor(degree_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('cluster_degrad',  torch.tensor(cluster_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('spectral_degrad',  torch.tensor(spectral_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
-        self.log('avg_degrad',  torch.tensor(avg_degrad).float().cuda(), on_step=False, on_epoch=True, sync_dist=True)
+        ###ema###
+        self.ema.restore(self.generator.parameters())
         
     def evaluate(self, train_set, val_set, test_set, device='cuda'):
         train_set.get_extra_data(True)
@@ -304,6 +327,9 @@ class Predictor(L.LightningModule):
 
         ############################        
         graph_pred_list = []
+        all_adj = []
+        all_node_features = []
+        all_edge_features = []
         for batch in DataLoader(test_set, batch_size=self.hparams.batch_size, shuffle=False, num_workers=0):            
             b,n,d = batch[0].shape
             
@@ -318,7 +344,11 @@ class Predictor(L.LightningModule):
                 noise = torch.cat([noise,noisy_gen_node_features],-1)
                 fake_adj, fake_node_features, fake_edge_features = self.generator(noise, noisy_gen_eigval, noisy_gen_eigvec, mask)
                 fake_adj = fake_adj.cpu()
-             
+     
+                all_adj.append((fake_adj>0.5).float().cpu()) #Bxnxn
+                all_node_features.append(fake_node_features.argmax(-1).cpu()) #Bxn
+                all_edge_features.append(fake_edge_features.argmax(-1).cpu()) #Bxnxn
+
                 for i, A in enumerate(fake_adj.cpu()):
                     A = (A>0.5).float()
                     mask = A.sum(-1)>0
@@ -330,6 +360,9 @@ class Predictor(L.LightningModule):
                 del fake_edge_features
                 del fake_node_features                
 
+        all_adj = torch.cat(all_adj,0)
+        all_node_features = torch.cat(all_node_features,0)
+        all_edge_features = torch.cat(all_edge_features,0)
         graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0][:]
 
         try:
@@ -366,25 +399,43 @@ class Predictor(L.LightningModule):
             np.fill_diagonal(Aori,0)
             Aori= Aori*(-1)
             graph_train_list.append(nx.from_numpy_array(Aori))
-        
-        #remove highly connected graphs that would slow down the metrics computation (this is done only during training)
-        graph_pred_list_remove_empty = [g for g in graph_pred_list_remove_empty if np.mean(nx.adjacency_matrix(g))<0.33]
 
-        degree, cluster, orbit, unique, novel, spectral = 0,0,0,0,0,0
-        if len(graph_pred_list_remove_empty)>0:
-            degree = degree_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
-            cluster = clustering_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
-            # orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
-            unique,novel,_ = eval_fraction_unique_non_isomorphic_valid(graph_pred_list_remove_empty,graph_train_list)
-            spectral = spectral_stats(graph_test_list, graph_pred_list_remove_empty)
+        if self.hparams.dataset=='qm9':
+            def get_cc(A):
+                G = nx.Graph(A[1].numpy())
+                c = list(list(sorted(nx.connected_components(G), key=len, reverse=True))[0])
+                
+                return A[0][c], A[1][c,:][:,c], A[2][c,:][:,c]
 
-        degree_degrad = degree/train_set.degree
-        cluster_degrad = cluster/train_set.cluster
-        spectral_degrad = spectral/train_set.spectral
-
-        avg_degrad = (degree_degrad + cluster_degrad + spectral_degrad)/3
-
-        if len(graph_pred_list_remove_empty)<15:
-            avg_degrad =  1e3
-        
-        return degree, cluster, unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad
+            if self.molecular_metrics is None:
+                atom_dict = {0: 'C', 1: 'N', 2: 'O', 3: 'F'}       #  Warning: hydrogens have been removed
+                bond_dict = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+                self.molecular_metrics = BasicMolecularMetrics(atom_dict, bond_dict, train_set, strict=False)
+                
+            # gen_good = [get_cc(A) for A in list(zip(all_node_features, all_adj, all_edge_features)) if nx.is_connected(nx.Graph(A[1].numpy()))]
+            gen_good = list(zip(all_node_features, all_adj, all_edge_features))
+            
+            (valid,unique,novel),_ = self.molecular_metrics.evaluate(gen_good)
+            return valid,unique,novel
+        else:    
+            #remove highly connected graphs that would slow down the metrics computation (this is done only during training)
+            graph_pred_list_remove_empty = [g for g in graph_pred_list_remove_empty if np.mean(nx.adjacency_matrix(g))<0.33]
+    
+            degree, cluster, orbit, unique, novel, spectral = 0,0,0,0,0,0
+            if len(graph_pred_list_remove_empty)>0:
+                degree = degree_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
+                cluster = clustering_stats( graph_test_list,graph_pred_list_remove_empty, compute_emd=False)
+                # orbit = orbit_stats_all(graph_test_list, graph_pred_list_remove_empty, compute_emd=False)
+                unique,novel,_ = eval_fraction_unique_non_isomorphic_valid(graph_pred_list_remove_empty,graph_train_list)
+                spectral = spectral_stats(graph_test_list, graph_pred_list_remove_empty)
+    
+            degree_degrad = degree/train_set.degree
+            cluster_degrad = cluster/train_set.cluster
+            spectral_degrad = spectral/train_set.spectral
+    
+            avg_degrad = (degree_degrad + cluster_degrad + spectral_degrad)/3
+    
+            if len(graph_pred_list_remove_empty)<15:
+                avg_degrad =  1e3
+            
+            return degree, cluster, unique, novel, spectral, degree_degrad, cluster_degrad, spectral_degrad, avg_degrad
