@@ -28,15 +28,18 @@ predictor_model_checkpoint = 'data/model_weights/predictor_sbm_200.ckpt'
 diffusion_model_checkpoint = 'data/model_weights/diffusion_planar_64_200.ckpt'
 predictor_model_checkpoint = 'data/model_weights/predictor_planar_64_200.ckpt'
 
-# diffusion_model_checkpoint = 'data/model_weights/diffusion_proteins.ckpt'
-# predictor_model_checkpoint = 'data/model_weights/predictor_proteins.ckpt'
+diffusion_model_checkpoint = 'data/model_weights/diffusion_proteins.ckpt'
+predictor_model_checkpoint = 'data/model_weights/predictor_proteins.ckpt'
+
+diffusion_model_checkpoint = 'data/model_weights/diffusion_qm9.ckpt'
+predictor_model_checkpoint = 'data/model_weights/predictor_qm9.ckpt'
 
 device = 'cuda'
 n_graphs = 10
 sampling_steps = 200
 
-model_predictor = Predictor.load_from_checkpoint(predictor_model_checkpoint, strict=False).generator
-model_diffusion = SpectralDiffusion.load_from_checkpoint(diffusion_model_checkpoint, strict=False)
+model_predictor = Predictor.load_from_checkpoint(predictor_model_checkpoint, nodefeatures="qm9" in predictor_model_checkpoint, strict=False).generator
+model_diffusion = SpectralDiffusion.load_from_checkpoint(diffusion_model_checkpoint, nodefeatures="qm9" in diffusion_model_checkpoint, strict=False)
 model_predictor.eval()
 model_diffusion.eval()
 args = model_diffusion.hparams
@@ -52,7 +55,7 @@ n_nodes = list(train_set.sample_n_nodes(n_graphs-1)) + [train_set.n_max]
 start = time.time()
 with torch.no_grad():
     #generate 
-    xx,yy = model_diffusion.sample_eigs(n_nodes, args.k, scale_xy=train_set.scale_xy, unscale_xy=train_set.unscale_xy, 
+    xx,yy = model_diffusion.sample_eigs(n_nodes, args.k+args.feature_size, scale_xy=train_set.scale_xy, unscale_xy=train_set.unscale_xy, 
                               reproject=False,sampling_steps=sampling_steps)
     
     #predict
