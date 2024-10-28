@@ -67,7 +67,7 @@ def get_arg_parser():
     parser.add_argument('--max_epochs', type=int, default=500000)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--seed', type=int, default=2020)
-    parser.add_argument('--val_check_interval', type=int, default=100)#500
+    parser.add_argument('--val_check_interval', type=int, default=1000)#500
     parser.add_argument('--wandb', type=eval, default=True, choices=[True, False])    
     
     return parser
@@ -172,8 +172,7 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_logger = WandbLogger(
             name=f"{args.model_tag}_k-{args.k}_sm-{args.smallest}_dm-{args.diffusion_model}",
-            project="graph_diffusion_refinement_4",
-            entity="l_cosmo",
+            project="graph_diffusion_predictor",
             offline=False
         )
     else:
